@@ -164,6 +164,29 @@ and the terms with the job foreman's and driver's signatures. Every load line
 still takes the four one-tap GPS stamps (load in/out, unload in/out); the PDF
 prints the first and last of them as the load time.
 
+### Who can do what
+
+"Admin" below means the `admin` and `master_admin` roles. Each rule is held
+at the database (row security or a trigger) and again in the API route, so
+the screens are a convenience, not the boundary.
+
+- **Invoices** — only an admin edits, voids, re-attaches or deletes one
+  (`/api/quickbooks/*-invoice` routes; `orders` delete policy; the
+  `guard_order_delivery_update` and `guard_work_order_invoice` triggers keep
+  non-admins to the delivery columns and away from the QuickBooks link).
+  Creating the invoice on approval stays with the office, as in the ticket flow.
+- **Hours and the time clock** — an employee logs their own hours and clocks
+  themselves in/out through the geofenced route; only an admin edits or
+  deletes hours, edits a clock session, or clocks someone else in or out.
+  Employees ask for corrections through time-clock adjustment requests.
+- **Users** — only an admin creates logins, changes roles, resets passwords
+  or removes a login (`/api/admin/users*`, `set-role`, `reset-password`), and
+  only a master admin may touch another admin. A hauling company's login can
+  add driver logins for its own company (`/api/haulers/drivers`); the role is
+  fixed to `driver` and pinned to that company.
+- **Admin-only screens** — everything under `/admin` (Time Clock, Users,
+  Deliveries, Customers, PO #, Dashboard) redirects any other role away.
+
 ### 7 — Connect to Auto 1 Funding
 
 This app identifies itself to the funding hub as source `jon-stubbs-trucking`

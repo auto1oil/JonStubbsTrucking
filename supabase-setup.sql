@@ -259,8 +259,13 @@ drop policy if exists "time_clock admin all" on public.time_clock;
 create policy "time_clock admin all" on public.time_clock for all to authenticated
   using (public.is_admin()) with check (public.is_admin());
 drop policy if exists "time_clock own" on public.time_clock;
-create policy "time_clock own" on public.time_clock for all to authenticated
-  using (employee_id = auth.uid()) with check (employee_id = auth.uid());
+-- An employee's own punches go through /api/time-clock/self (service role,
+-- geofenced), so from the browser they only READ their sessions. Writing a
+-- session directly — backdating a clock-in, deleting a short day — is an
+-- admin's alone.
+drop policy if exists "time_clock own read" on public.time_clock;
+create policy "time_clock own read" on public.time_clock for select to authenticated
+  using (employee_id = auth.uid());
 grant delete on public.time_clock to authenticated;  -- admins can remove a bogus session
 
 -- Time-clock adjustment requests: an employee who forgot to clock in/out asks
@@ -524,16 +529,15 @@ create policy "Admins view all hours"   on public.hours
   for select using (public.is_admin());
 create policy "Drivers view own hours"  on public.hours
   for select using (employee_id = auth.uid());
+-- An employee logs their OWN hours; nobody else's. Once a row is in, only an
+-- admin changes or removes it — a wrong entry is corrected by the office, not
+-- quietly rewritten by the person it pays.
 create policy "Anyone signed in can insert hours" on public.hours
-  for insert with check (auth.uid() is not null);
+  for insert with check (public.is_admin() or employee_id = auth.uid());
 create policy "Admins update any hours" on public.hours
   for update using (public.is_admin());
-create policy "Drivers update own hours" on public.hours
-  for update using (employee_id = auth.uid());
 create policy "Admins delete hours"     on public.hours
   for delete using (public.is_admin());
-create policy "Drivers delete own hours" on public.hours
-  for delete using (employee_id = auth.uid());
 
 -- ---- delivery_log ----
 drop policy if exists "auth_users_view_delivery_log"    on public.delivery_log;
@@ -572,13 +576,20 @@ create policy "Signed-in users can read invoices"
   on storage.objects for select
   using (bucket_id = 'invoices' and auth.uid() is not null);
 
+-- A driver adds the signed delivery copy (…/signed-<stamp>.pdf|jpg) when
+-- they mark an order delivered. Everything else in the bucket — the invoice
+-- PDFs themselves — is written by an admin or by the server.
 create policy "Signed-in users can upload invoices"
   on storage.objects for insert
-  with check (bucket_id = 'invoices' and auth.uid() is not null);
+  with check (
+    bucket_id = 'invoices' and auth.uid() is not null
+    and (public.is_admin() or name like '%/signed-%')
+  );
 
-create policy "Signed-in users can update invoices"
+drop policy if exists "Admins can update invoices" on storage.objects;
+create policy "Admins can update invoices"
   on storage.objects for update
-  using (bucket_id = 'invoices' and auth.uid() is not null);
+  using (bucket_id = 'invoices' and public.is_admin());
 
 create policy "Admins can delete invoices"
   on storage.objects for delete
@@ -3044,6 +3055,66 @@ alter table public.work_orders add column if not exists safety_initials  text;
 -- What each load carried. Blank falls back to the ticket's material when the
 -- PDF prints — the paper's ditto mark.
 alter table public.work_order_loads add column if not exists material text;
+
+notify pgrst, 'reload schema';
+
+
+-- ==========================================================================
+-- 50. Only an admin changes an invoice
+-- ==========================================================================
+-- RLS gates rows, not columns. Two tables let non-admins update rows for a
+-- good reason — a driver marks a delivery order delivered, the office works
+-- a ticket — and that same policy would let them rewrite the invoice on it.
+-- These triggers hold the invoice columns to admins (and to the server's
+-- service role, which does its own checking in the API routes).
+-- ==========================================================================
+
+-- orders: a non-admin may change only the delivery columns.
+create or replace function public.guard_order_delivery_update()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  delivery_cols text[] := array[
+    'status', 'loaded_at', 'loaded_by', 'loaded_by_name',
+    'delivered', 'delivered_at', 'delivered_by', 'delivered_by_name',
+    'delivery_note', 'signer_name', 'signed_pdf_path'
+  ];
+begin
+  if auth.uid() is null or current_user = 'service_role' or public.is_admin() then
+    return new;
+  end if;
+  if (to_jsonb(new) - delivery_cols) is distinct from (to_jsonb(old) - delivery_cols) then
+    raise exception 'only an admin can change an order''s invoice or details';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_guard_order_delivery_update on public.orders;
+create trigger trg_guard_order_delivery_update
+  before update on public.orders
+  for each row execute function public.guard_order_delivery_update();
+
+-- work_orders: the QuickBooks invoice link is set by the approve/invoice
+-- routes (service role) and edited by admins; nobody else touches it.
+create or replace function public.guard_work_order_invoice()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null or current_user = 'service_role' or public.is_admin() then
+    return new;
+  end if;
+  if new.qb_invoice_id is distinct from old.qb_invoice_id
+     or new.qb_invoice_number is distinct from old.qb_invoice_number
+     or new.qb_synced_at is distinct from old.qb_synced_at then
+    raise exception 'only an admin can change a ticket''s invoice';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_guard_work_order_invoice on public.work_orders;
+create trigger trg_guard_work_order_invoice
+  before update on public.work_orders
+  for each row execute function public.guard_work_order_invoice();
 
 notify pgrst, 'reload schema';
 
