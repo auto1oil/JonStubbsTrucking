@@ -11,8 +11,10 @@ import HaulerOnTicket from '@/components/HaulerOnTicket';
 import { orderLabel, ticketDefaultsFrom, type JobOrder } from '@/lib/job-orders';
 import {
   onSiteHours, totalHours, ticketAmount, billableUnit, billableQuantity,
+  SAFETY_CHECK_ITEMS,
   type WorkOrder,
 } from '@/lib/work-orders';
+import { TRAILER_TYPES } from '@/lib/haulers';
 
 // The field ticket itself — one form used three ways: a crew member filling one
 // out, the same crew member fixing a draft, and the office editing a submitted
@@ -27,15 +29,6 @@ type Rate = { job_number: string; phase_code: string | null; rate: number; rate_
 type Draft = Record<string, string>;
 
 const TONNAGE_TYPES = ['', 'Dirt', 'Gravel', 'Asphalt', 'Debris', 'Water', 'Other'];
-// The 'Truck Type — check one' box on the paper ticket, in the printed order.
-// StrongArm and End Dump carry a tonnage on the form, which is why there's a
-// separate tons field beside the picker.
-const TRUCK_TYPES = [
-  'Truck & Pup', 'Double Belly', '6 Axel SS or DS',
-  'StrongArm', 'Single Belly', 'Super Side',
-  'End Dump', 'Vacuum Trailer', 'Single Side',
-];
-const TRUCK_TYPES_WITH_TONS = ['StrongArm', 'End Dump'];
 // Suggestions only — the field is free text, so a unit that isn't listed
 // still gets typed in rather than being blocked.
 const EQUIPMENT_TYPES = [
@@ -56,13 +49,12 @@ function toDraft(wo: Partial<WorkOrder> | null): Draft {
     ticket_number: v(wo?.ticket_number),
     trucking_company: v(wo?.trucking_company),
     material: v(wo?.material),
-    supplier: v(wo?.supplier),
+    pit_address: v(wo?.pit_address),
+    plate_number: v(wo?.plate_number),
+    safety_initials: v(wo?.safety_initials),
     truck_type: v(wo?.truck_type),
-    truck_type_tons: v(wo?.truck_type_tons),
     driver_start_at: toLocalInput(wo?.driver_start_at ?? null),
     driver_end_at: toLocalInput(wo?.driver_end_at ?? null),
-    signed_out_state: v(wo?.signed_out_state),
-    sign_out_at: toLocalInput(wo?.sign_out_at ?? null),
     day_number: v(wo?.day_number),
     phase_code: v(wo?.phase_code),
     claim_number: v(wo?.claim_number),
@@ -210,6 +202,8 @@ export default function WorkOrderForm({
   const [foremanSigner, setForemanSigner] = useState<{ name: string | null; at: string | null }>({
     name: workOrder?.foreman_signature_name ?? null, at: workOrder?.foreman_signature_signed_at ?? null,
   });
+  // The driver's daily safety check — which items were ticked.
+  const [safety, setSafety] = useState<string[]>(workOrder?.safety_check ?? []);
   // Factor Payment only exists for a company whose Auto 1 Funding account is
   // linked — approved (and revocable) on the factoring app's side.
   const [factorAllowed, setFactorAllowed] = useState(false);
@@ -336,13 +330,13 @@ export default function WorkOrderForm({
       ticket_number: draft.ticket_number.trim() || null,
       trucking_company: draft.trucking_company.trim() || null,
       material: draft.material.trim() || null,
-      supplier: draft.supplier.trim() || null,
-      truck_type: draft.truck_type || null,
-      truck_type_tons: draft.truck_type_tons === '' ? null : Number(draft.truck_type_tons),
+      pit_address: draft.pit_address.trim() || null,
+      plate_number: draft.plate_number.trim() || null,
+      safety_check: safety,
+      safety_initials: draft.safety_initials.trim() || null,
+      truck_type: draft.truck_type.trim() || null,
       driver_start_at: fromLocalInput(draft.driver_start_at),
       driver_end_at: fromLocalInput(draft.driver_end_at),
-      signed_out_state: draft.signed_out_state || null,
-      sign_out_at: fromLocalInput(draft.sign_out_at),
       day_number: draft.day_number.trim() || null,
       phase_code: draft.phase_code.trim() || null,
       claim_number: draft.claim_number.trim() || null,
@@ -551,13 +545,11 @@ export default function WorkOrderForm({
     <div className="space-y-4">
       {workOrder?.hauler_id && <HaulerOnTicket haulerId={workOrder.hauler_id} />}
 
+      {/* The left block of the paper ticket: who hauled, for whom, from
+          where, to where, and what. */}
       <div className="bg-white border border-gray-200 rounded-lg p-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-3">Job</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {/* The order book and the customer directory are Jon Stubbs Trucking's — a
-              hauling company cannot read either, by design, because the order
-              carries the customer rate. So rather than show them two pickers
-              that can never fill, their ticket says where its job comes from. */}
           {isHauler ? (
             <div className="col-span-2 sm:col-span-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
               {draft.order_id ? (
@@ -598,89 +590,104 @@ export default function WorkOrderForm({
               </div>
             </>
           )}
-          <label><span className={label}>Driver name</span>
-            <input value={draft.driver_name} onChange={(e) => set('driver_name', e.target.value)} disabled={locked} className={input} />
+          <label><span className={label}>Carrier name</span>
+            <input value={draft.trucking_company} onChange={(e) => set('trucking_company', e.target.value)} disabled={locked} className={input} placeholder="JST" />
           </label>
-          <label><span className={label}>Ticket #</span>
-            <input value={draft.ticket_number} onChange={(e) => set('ticket_number', e.target.value)} disabled={locked} className={input} />
-          </label>
-          <label><span className={label}>Trucking company</span>
-            <input value={draft.trucking_company} onChange={(e) => set('trucking_company', e.target.value)} disabled={locked} className={input} />
-          </label>
-          <label><span className={label}>Customer #</span>
+          <label className="col-span-2"><span className={label}>Contractor name</span>
             <input value={draft.customer_number} onChange={(e) => set('customer_number', e.target.value)} disabled={orderLocked} className={jobInput} />
           </label>
-          <label><span className={label}>Job #</span>
-            <input value={draft.job_number} onChange={(e) => set('job_number', e.target.value)} disabled={orderLocked} className={jobInput} />
+          <label className="col-span-2 sm:col-span-3"><span className={label}>Pit address</span>
+            <input value={draft.pit_address} onChange={(e) => set('pit_address', e.target.value)} disabled={locked} className={input} placeholder="Where the material is loaded" />
           </label>
           <label className="col-span-2"><span className={label}>Job name</span>
             <input value={draft.job_name} onChange={(e) => set('job_name', e.target.value)} disabled={orderLocked} className={jobInput} />
           </label>
+          <label><span className={label}>Job #</span>
+            <input value={draft.job_number} onChange={(e) => set('job_number', e.target.value)} disabled={orderLocked} className={jobInput} />
+          </label>
           <label className="col-span-2 sm:col-span-3"><span className={label}>Job address</span>
             <input value={draft.job_address} onChange={(e) => set('job_address', e.target.value)} disabled={orderLocked} className={jobInput} />
           </label>
-          <label><span className={label}>Day #</span>
-            <input value={draft.day_number} onChange={(e) => set('day_number', e.target.value)} disabled={locked} className={input} />
+          <label><span className={label}>Material</span>
+            <input value={draft.material} onChange={(e) => set('material', e.target.value)} disabled={locked} className={input} placeholder="e.g. XOUT, A1A" />
           </label>
           <label><span className={label}>Phase code</span>
             <input value={draft.phase_code} onChange={(e) => set('phase_code', e.target.value)} disabled={orderLocked} className={jobInput} />
           </label>
-          <label><span className={label}>Claim #</span>
-            <input value={draft.claim_number} onChange={(e) => set('claim_number', e.target.value)} disabled={orderLocked} className={jobInput} />
+          <label><span className={label}>Ticket #</span>
+            <input value={draft.ticket_number} onChange={(e) => set('ticket_number', e.target.value)} disabled={locked} className={input} placeholder="Pre-printed number" />
           </label>
-          <label><span className={label}>Unit # (truck)</span>
-            <input value={draft.unit_number} onChange={(e) => set('unit_number', e.target.value)} disabled={locked} className={input} />
-          </label>
-          <label><span className={label}>Equipment type</span>
-            <input value={draft.equipment_type} onChange={(e) => set('equipment_type', e.target.value)} disabled={locked} className={input} list="equipment-types" />
-            <datalist id="equipment-types">
-              {EQUIPMENT_TYPES.map((t) => <option key={t} value={t} />)}
-            </datalist>
-          </label>
+        </div>
+        {/* The order carries a few things the paper has no line for. They
+            still ride on the ticket (the invoice description reads them),
+            just out of the way. */}
+        <details className="mt-3">
+          <summary className="text-xs text-gray-500 cursor-pointer select-none">More job details (day, claim, FSR, equipment)</summary>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
+            <label><span className={label}>Day #</span>
+              <input value={draft.day_number} onChange={(e) => set('day_number', e.target.value)} disabled={locked} className={input} />
+            </label>
+            <label><span className={label}>Claim #</span>
+              <input value={draft.claim_number} onChange={(e) => set('claim_number', e.target.value)} disabled={orderLocked} className={jobInput} />
+            </label>
+            <label><span className={label}>FSR</span>
+              <input value={draft.fsr} onChange={(e) => set('fsr', e.target.value)} disabled={orderLocked} className={jobInput} />
+            </label>
+            <label><span className={label}>Equipment type</span>
+              <input value={draft.equipment_type} onChange={(e) => set('equipment_type', e.target.value)} disabled={locked} className={input} list="equipment-types" />
+              <datalist id="equipment-types">
+                {EQUIPMENT_TYPES.map((t) => <option key={t} value={t} />)}
+              </datalist>
+            </label>
+          </div>
+        </details>
+      </div>
+
+      {/* The right block of the paper: the day, the driver, the truck, and
+          the start and end of the haul. */}
+      <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-3">Driver &amp; truck</h2>
+        <div className="grid grid-cols-2 gap-3">
           <label><span className={label}>Date</span>
             <input type="date" value={draft.job_date} onChange={(e) => set('job_date', e.target.value)} disabled={locked} className={input} />
           </label>
-        </div>
-      </div>
-
-      <div className="bg-white border border-gray-200 rounded-lg p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-3">Material &amp; truck</h2>
-        <div className="grid grid-cols-2 gap-3">
-          <label><span className={label}>Material</span>
-            <input value={draft.material} onChange={(e) => set('material', e.target.value)} disabled={locked} className={input} />
+          <label><span className={label}>Driver</span>
+            <input value={draft.driver_name} onChange={(e) => set('driver_name', e.target.value)} disabled={locked} className={input} />
           </label>
-          <label><span className={label}>Supplier</span>
-            <input value={draft.supplier} onChange={(e) => set('supplier', e.target.value)} disabled={locked} className={input} />
+          <label><span className={label}>Truck no.</span>
+            <input value={draft.unit_number} onChange={(e) => set('unit_number', e.target.value)} disabled={locked} className={input} />
           </label>
-          <label><span className={label}>Truck type</span>
-            <select value={draft.truck_type} onChange={(e) => set('truck_type', e.target.value)} disabled={locked} className={input}>
-              <option value="">— Pick one —</option>
-              {TRUCK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              <option value="Other">Other</option>
-            </select>
+          <label><span className={label}>Plate #</span>
+            <input value={draft.plate_number} onChange={(e) => set('plate_number', e.target.value)} disabled={locked} className={input} />
           </label>
-          {/* StrongArm and End Dump are written with a tonnage on the paper. */}
-          {TRUCK_TYPES_WITH_TONS.includes(draft.truck_type) && (
-            <label><span className={label}>{draft.truck_type} tons</span>
-              <input type="number" step="0.01" min="0" inputMode="decimal" value={draft.truck_type_tons}
-                onChange={(e) => set('truck_type_tons', e.target.value)} disabled={locked} className={input} />
-            </label>
-          )}
-        </div>
-      </div>
-
-      <div className="bg-white border border-gray-200 rounded-lg p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-3">Time &amp; amounts</h2>
-        <div className="grid grid-cols-2 gap-3">
+          {/* Free text like the paper ("Super side (5)"), with the yard's
+              usual trailer names offered as you type. */}
+          <label className="col-span-2"><span className={label}>Type of truck</span>
+            <input value={draft.truck_type} onChange={(e) => set('truck_type', e.target.value)} disabled={locked} className={input} list="truck-types" placeholder="e.g. Super Side, Belly Dump, End Dump" />
+            <datalist id="truck-types">
+              {TRAILER_TYPES.map((t) => <option key={t} value={t} />)}
+            </datalist>
+          </label>
           <TimeWheel label="Start" value={draft.start_at} onChange={(v) => set('start_at', v)}
             disabled={locked} defaultDate={draft.job_date} defaultMeridiem="AM" />
-          <TimeWheel label="Stop" value={draft.stop_at} onChange={(v) => set('stop_at', v)}
+          <TimeWheel label="End" value={draft.stop_at} onChange={(v) => set('stop_at', v)}
             disabled={locked} defaultDate={draft.job_date} defaultMeridiem="PM" />
-          <TimeWheel label="Driver time start" value={draft.driver_start_at} onChange={(v) => set('driver_start_at', v)}
+          <TimeWheel label="Start (2nd line)" value={draft.driver_start_at} onChange={(v) => set('driver_start_at', v)}
             disabled={locked} defaultDate={draft.job_date} defaultMeridiem="AM" />
-          <TimeWheel label="Driver time end" value={draft.driver_end_at} onChange={(v) => set('driver_end_at', v)}
+          <TimeWheel label="End (2nd line)" value={draft.driver_end_at} onChange={(v) => set('driver_end_at', v)}
             disabled={locked} defaultDate={draft.job_date} defaultMeridiem="PM" />
-          <label><span className={label}>Travel hours</span>
+          <p className="col-span-2 text-[11px] text-gray-500">
+            Start and End are the haul that bills &mdash; truck hours come from them. The
+            second START/END line on the pad is for a split day or the driver&apos;s own
+            clock when it differs; it&apos;s printed, not billed.
+          </p>
+        </div>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-3">Hours &amp; amounts</h2>
+        <div className="grid grid-cols-2 gap-3">
+          <label><span className={label}>Travel time (hrs)</span>
             <input type="number" step="0.25" min="0" inputMode="decimal" value={draft.travel_hours} onChange={(e) => set('travel_hours', e.target.value)} disabled={locked} className={input} />
           </label>
           <label><span className={label}>Down time (hrs)</span>
@@ -729,14 +736,10 @@ export default function WorkOrderForm({
               <option value="day">Day</option>
             </select>
           </label>
-          {/* The FSR rides with the money fields — it's who signs off on them. */}
-          <label className="col-span-2"><span className={label}>FSR</span>
-            <input value={draft.fsr} onChange={(e) => set('fsr', e.target.value)} disabled={orderLocked} className={jobInput} />
-          </label>
         </div>
 
         <div className="mt-3 rounded-md bg-gray-50 border border-gray-200 px-3 py-2 text-sm flex flex-wrap gap-x-6 gap-y-1">
-          <span className="text-gray-600">On site <strong className="tabular-nums">{onSiteHours(preview.start_at, preview.stop_at).toFixed(2)}</strong> hrs</span>
+          <span className="text-gray-600">Truck hours <strong className="tabular-nums">{onSiteHours(preview.start_at, preview.stop_at).toFixed(2)}</strong></span>
           <span className="text-gray-600">Total <strong className="tabular-nums">{hours.toFixed(2)}</strong> hrs</span>
           {loadTotals.loads > 0 && (
             <span className="text-gray-600">
@@ -751,35 +754,62 @@ export default function WorkOrderForm({
         </div>
       </div>
 
-      {/* The sixteen load lines. They hang off the saved ticket, so on a brand
-          new one they appear as soon as it's been saved once as a draft. */}
+      {/* The twenty-eight load lines. They hang off the saved ticket, so on a
+          brand new one they appear as soon as it's been saved once as a
+          draft. */}
       {id ? (
         <LoadLines
           workOrderId={id}
           locked={locked}
+          defaultMaterial={draft.material.trim()}
           onTotalsChange={setLoadTotals}
         />
       ) : (
         <div className="bg-white border border-dashed border-gray-300 rounded-lg p-4 text-sm text-gray-600">
           <strong className="block text-gray-900 mb-1">Loads</strong>
-          Save this ticket as a draft and the sixteen load lines open up, with
-          one-tap in and out times for each load.
+          Save this ticket as a draft and the twenty-eight load lines open up,
+          with one-tap in and out times for each load.
         </div>
       )}
 
+      {/* The "Drivers Daily Safety Check" column off the paper. */}
       <div className="bg-white border border-gray-200 rounded-lg p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-3">Signed out</h2>
-        <div className="grid grid-cols-2 gap-3">
-          <label><span className={label}>Loaded or empty</span>
-            <select value={draft.signed_out_state} onChange={(e) => set('signed_out_state', e.target.value)} disabled={locked} className={input}>
-              <option value="">—</option>
-              <option value="loaded">Loaded</option>
-              <option value="empty">Empty</option>
-            </select>
-          </label>
-          <TimeWheel label="Sign out time" value={draft.sign_out_at} onChange={(v) => set('sign_out_at', v)}
-            disabled={locked} defaultDate={draft.job_date} defaultMeridiem="PM" />
+        <div className="flex items-baseline justify-between gap-2 flex-wrap mb-1">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Driver&apos;s daily safety check</h2>
+          {!locked && (
+            <div className="flex gap-3 text-xs">
+              <button type="button" onClick={() => setSafety(SAFETY_CHECK_ITEMS.map((i) => i.key))} className="text-brand-700 hover:underline">Check all</button>
+              <button type="button" onClick={() => setSafety([])} className="text-gray-500 hover:underline">Clear</button>
+            </div>
+          )}
         </div>
+        <p className="text-xs text-gray-500 mb-3">
+          Tick each item you checked before driving. Driver must report mechanical
+          defects to the shop supervisor before driving the vehicle.
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
+          {SAFETY_CHECK_ITEMS.map((item) => (
+            <label key={item.key} className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={safety.includes(item.key)}
+                disabled={locked}
+                onChange={(e) => setSafety((cur) => (
+                  e.target.checked ? [...cur.filter((k) => k !== item.key), item.key] : cur.filter((k) => k !== item.key)
+                ))}
+                className="h-4 w-4 rounded border-gray-300"
+              />
+              <span>{item.label}</span>
+            </label>
+          ))}
+        </div>
+        <label className="block mt-3 max-w-xs"><span className={label}>Driver&apos;s initials</span>
+          <input value={draft.safety_initials} onChange={(e) => set('safety_initials', e.target.value.toUpperCase())} disabled={locked} className={input} maxLength={6} />
+          <span className="block mt-1 text-[11px] text-gray-500">
+            I have checked each item on the above list and will report to the shop
+            foreman any defects found.
+          </span>
+        </label>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -817,8 +847,8 @@ export default function WorkOrderForm({
           onChange={setForemanSignature}
           onSigned={(name, at) => setForemanSigner({ name, at })}
           readOnly={locked}
-          label="Foreman's signature"
-          hint="The foreman types their name and signs on site at the end of the day."
+          label="Job foreman's signature"
+          hint="The job foreman types their name and signs on site at the end of the day."
         />
       </div>
 

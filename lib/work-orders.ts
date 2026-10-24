@@ -58,8 +58,15 @@ export type WorkOrder = {
   trucking_company: string | null;
   material: string | null;
   supplier: string | null;
+  // Where the material was loaded — the "Pit address" line on the paper.
+  pit_address: string | null;
+  plate_number: string | null;
   truck_type: string | null;
   truck_type_tons: number | null;
+  // The "Drivers Daily Safety Check" column: the keys of the items ticked
+  // (see SAFETY_CHECK_ITEMS) and the driver's initials under it.
+  safety_check: string[];
+  safety_initials: string | null;
   driver_start_at: string | null;
   driver_end_at: string | null;
   signed_out_state: 'loaded' | 'empty' | null;
@@ -162,9 +169,53 @@ export type WorkOrderLoad = {
   unload_out_lng: number | null;
   unload_out_accuracy: number | null;
   tons: number | null;
+  // What this load carried, when it differs from the ticket's material (the
+  // paper has a MATERIAL column per load, mostly filled with ditto marks).
+  material: string | null;
   created_at: string;
   updated_at: string;
 };
+
+// The paper pad has 28 load lines — two columns of fourteen.
+export const MAX_LOADS = 28;
+
+// The "Drivers Daily Safety Check" column on the paper ticket, in printed
+// order. Stored on the ticket by key so a reworded label doesn't unset a
+// saved tick.
+export const SAFETY_CHECK_ITEMS = [
+  { key: 'engine_oil', label: 'Engine oil level' },
+  { key: 'hydraulic_oil', label: 'Hydraulic oil level' },
+  { key: 'coolant', label: 'Coolant level' },
+  { key: 'fuel', label: 'Fuel' },
+  { key: 'wheels', label: 'Wheels, rims and lugs' },
+  { key: 'tires', label: 'Tires and tire pressure' },
+  { key: 'turn_signals', label: 'Turn signals' },
+  { key: 'lights', label: 'Lights' },
+  { key: 'air_leaks', label: 'Air leaks' },
+  { key: 'brakes', label: 'Brakes' },
+  { key: 'mud_flaps', label: 'Mud flaps' },
+  { key: 'horns', label: 'Horns' },
+  { key: 'mirrors', label: 'Rear vision mirrors' },
+  { key: 'clean', label: 'Truck clean of debris' },
+  { key: 'wipers', label: 'Windshield wipers' },
+  { key: 'fire_extinguisher', label: 'Fire extinguisher' },
+  { key: 'triangles', label: 'Triangles' },
+  { key: 'steering', label: 'Steering' },
+  { key: 'coupling', label: 'Coupling device' },
+  { key: 'backup_alarm', label: 'Back-up alarm' },
+] as const;
+export type SafetyCheckKey = (typeof SAFETY_CHECK_ITEMS)[number]['key'];
+
+// "Last load unloaded" on the paper: the latest unload-out stamp on the
+// ticket (falling back to the latest stamp of any kind on the last load).
+export function lastUnloadAt(loads: Pick<WorkOrderLoad, 'load_no' | 'unload_out_at' | 'unload_in_at' | 'load_out_at' | 'load_in_at'>[]): string | null {
+  let best: string | null = null;
+  for (const l of loads) {
+    const t = l.unload_out_at || l.unload_in_at || l.load_out_at || l.load_in_at;
+    if (t && (!best || new Date(t) > new Date(best))) best = t;
+  }
+  return best;
+}
 
 // The four stamps in the order they happen on a run.
 export const LOAD_STAMPS = [
@@ -181,7 +232,7 @@ export function totalLoadTons(loads: Pick<WorkOrderLoad, 'tons'>[]): number {
   return Math.round(sum * 100) / 100;
 }
 
-// A load counts once it has been started — an untouched row on a 16-line pad
+// A load counts once it has been started — an untouched row on a 28-line pad
 // is not a load that ran.
 export function countLoads(loads: Pick<WorkOrderLoad, 'load_in_at' | 'tons'>[]): number {
   return loads.filter((l) => l.load_in_at || Number(l.tons || 0) > 0).length;
@@ -195,6 +246,7 @@ export const EDITABLE_FIELDS = [
   'job_address', 'day_number', 'phase_code', 'claim_number', 'unit_number',
   'equipment_type', 'fsr', 'job_date', 'driver_name', 'ticket_number',
   'hauler_id', 'hauler_load_id', 'trucking_company', 'material', 'supplier',
+  'pit_address', 'plate_number', 'safety_check', 'safety_initials',
   'truck_type', 'truck_type_tons', 'driver_start_at', 'driver_end_at',
   'signed_out_state', 'sign_out_at', 'foreman_signature_path',
   'signature_name', 'signature_signed_at',
@@ -226,6 +278,13 @@ export function pickEditable(body: Record<string, unknown>): Record<string, unkn
   for (const key of EDITABLE_FIELDS) {
     if (!(key in body)) continue;
     const raw = body[key];
+    // The safety check is a not-null array column: whatever arrives that
+    // isn't a list of known item keys is stored as "nothing ticked".
+    if (key === 'safety_check') {
+      const known = new Set<string>(SAFETY_CHECK_ITEMS.map((i) => i.key));
+      out[key] = Array.isArray(raw) ? raw.filter((k): k is string => typeof k === 'string' && known.has(k)) : [];
+      continue;
+    }
     if (raw === '' || raw === undefined) { out[key] = null; continue; }
     if (raw !== null && NUMERIC_FIELDS.has(key)) {
       const n = Number(raw);

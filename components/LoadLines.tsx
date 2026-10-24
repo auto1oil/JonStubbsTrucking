@@ -2,12 +2,12 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import {
-  LOAD_STAMPS, totalLoadTons, countLoads,
+  LOAD_STAMPS, MAX_LOADS, totalLoadTons, countLoads,
   type WorkOrderLoad, type LoadStampKey,
 } from '@/lib/work-orders';
 
-// The sixteen load lines off the paper haul ticket: per load, a ticket number,
-// the four in/out stamps, and what it weighed.
+// The twenty-eight load lines off the paper haul ticket: per load, a ticket
+// number, the four in/out stamps, what it weighed, and what it carried.
 //
 // A stamp is one tap. The time is taken from the phone the instant the button
 // is pressed and shown straight away — the GPS fix is chased afterwards with a
@@ -15,16 +15,18 @@ import {
 // a driver in a pit with no sky should still get an accurate time, and waiting
 // on a fix before showing anything makes the button feel broken.
 //
-// The paper form is a 7-column grid, which is unusable on a phone, so each
-// load is a card instead. Same information, one thumb.
+// The paper form is a ruled grid, which is unusable on a phone, so each load
+// is a card instead. Same information, one thumb.
 
 type Props = {
   workOrderId: string;
   locked?: boolean;
+  // The ticket's material — what a load carried unless its own line says
+  // otherwise, exactly like the ditto marks down the paper's MATERIAL column.
+  defaultMaterial?: string;
   onTotalsChange?: (totals: { loads: number; tons: number }) => void;
 };
 
-const MAX_LOADS = 16;
 const GPS_TIMEOUT_MS = 8000;
 
 type Fix = { lat: number; lng: number; accuracy: number } | null;
@@ -60,7 +62,7 @@ const clockOf = (iso: string | null) =>
 // corner.
 const FAB_POS_KEY = 'jst-stamp-fab-pos';
 
-export default function LoadLines({ workOrderId, locked = false, onTotalsChange }: Props) {
+export default function LoadLines({ workOrderId, locked = false, defaultMaterial = '', onTotalsChange }: Props) {
   const supabase = createClient();
   const [loads, setLoads] = useState<WorkOrderLoad[]>([]);
   const [loading, setLoading] = useState(true);
@@ -127,7 +129,7 @@ export default function LoadLines({ workOrderId, locked = false, onTotalsChange 
     refresh();
   }
 
-  async function setField(loadNo: number, field: 'ticket_number' | 'tons', value: string) {
+  async function setField(loadNo: number, field: 'ticket_number' | 'tons' | 'material', value: string) {
     const existing = loads.find((l) => l.load_no === loadNo);
     const val = value === '' ? null : (field === 'tons' ? Number(value) : value);
     // Keep the field responsive while the write is in flight.
@@ -177,8 +179,8 @@ export default function LoadLines({ workOrderId, locked = false, onTotalsChange 
   }, []);
 
   // The next stamp in the cycle, walking the last load that has any time on
-  // it. Null (no button) until the first Load In, and again once all sixteen
-  // lines are done.
+  // it. Null (no button) until the first Load In, and again once all
+  // twenty-eight lines are done.
   function nextStamp(): { loadNo: number; key: LoadStampKey; label: string } | null {
     const keys = LOAD_STAMPS.map((s) => s.key);
     const stamped = [...loads]
@@ -305,9 +307,9 @@ export default function LoadLines({ workOrderId, locked = false, onTotalsChange 
           {LOAD_STAMPS.map((s) => stampButton(loadNo, s.key, s.label, load))}
         </div>
 
-        <div className="grid grid-cols-2 gap-2 mt-2">
+        <div className="grid grid-cols-3 gap-2 mt-2">
           <label>
-            <span className="block text-[11px] text-gray-500 mb-0.5">Scale ticket #</span>
+            <span className="block text-[11px] text-gray-500 mb-0.5">Ticket #</span>
             <input
               defaultValue={load?.ticket_number || ''}
               onBlur={(e) => setField(loadNo, 'ticket_number', e.target.value.trim())}
@@ -321,6 +323,16 @@ export default function LoadLines({ workOrderId, locked = false, onTotalsChange 
               type="number" step="0.01" min="0" inputMode="decimal"
               defaultValue={load?.tons ?? ''}
               onBlur={(e) => setField(loadNo, 'tons', e.target.value.trim())}
+              disabled={locked}
+              className={input}
+            />
+          </label>
+          <label>
+            <span className="block text-[11px] text-gray-500 mb-0.5">Material</span>
+            <input
+              defaultValue={load?.material || ''}
+              placeholder={defaultMaterial ? `" (${defaultMaterial})` : ''}
+              onBlur={(e) => setField(loadNo, 'material', e.target.value.trim())}
               disabled={locked}
               className={input}
             />
@@ -349,8 +361,8 @@ export default function LoadLines({ workOrderId, locked = false, onTotalsChange 
           {showBlank && loadCard(nextNo)}
           {loads.length >= MAX_LOADS && (
             <p className="text-xs text-gray-500">
-              That&apos;s all sixteen lines — the same as the paper ticket. Start a
-              second ticket for anything past this.
+              That&apos;s all twenty-eight lines — the same as the paper ticket. Start
+              a second ticket for anything past this.
             </p>
           )}
         </div>

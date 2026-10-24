@@ -61,12 +61,15 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Contact — TODO(content): real phone/email/address */}
         <section>
           <h2 className="text-2xl font-bold text-brand-900 mb-3">Contact</h2>
-          <p className="text-gray-700">
-            {/* TODO(content): real phone, email, address. */}
-            Phone, email, and address go here.
+          <p className="text-gray-700 leading-7">
+            Jon Stubbs Trucking<br />
+            60 South Slant Rd, Mapleton, UT 84664<br />
+            Trucking: Jon <a href="tel:+18014287222" className="text-brand-700 hover:underline">801-428-7222</a>
+            {' · '}Office: Jen <a href="tel:+18019194404" className="text-brand-700 hover:underline">801-919-4404</a>,
+            {' '}Megan <a href="tel:+14356810144" className="text-brand-700 hover:underline">435-681-0144</a><br />
+            <a href="mailto:jonstubbstruckingllc@gmail.com" className="text-brand-700 hover:underline">jonstubbstruckingllc@gmail.com</a>
           </p>
         </section>
       </main>

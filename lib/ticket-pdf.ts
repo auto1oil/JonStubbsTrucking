@@ -1,7 +1,9 @@
-// The haul ticket as a PDF — laid out to mirror the paper form it replaced:
-// the company header, the field lines, the check-one truck-type grid, the
-// ruled sixteen-row load table, the Job Time block with both signatures on
-// their lines, and the gray office-use band.
+// The haul ticket as a PDF — laid out to mirror the Jon Stubbs Trucking paper
+// pad it replaced: the company header with the ticket number top right, the
+// carrier/contractor/pit/job/material block beside the day/date/driver/truck
+// block, the 28-row load table (two columns of fourteen) with the driver's
+// daily safety check down the right, the totals and notes boxes, and the
+// terms with the foreman's and driver's signatures on their lines.
 //
 // Generated server-side when a ticket is approved/invoiced or shared, stored
 // next to the ticket's photos in the work-tickets bucket, attached to the
@@ -14,28 +16,42 @@
 import { PDFDocument, PDFFont, PDFImage, PDFPage, StandardFonts, rgb } from 'pdf-lib';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  totalHours, totalLoadTons, countLoads,
+  totalHours, onSiteHours, countLoads, lastUnloadAt,
+  MAX_LOADS, SAFETY_CHECK_ITEMS,
   type WorkOrder, type WorkOrderLoad,
 } from '@/lib/work-orders';
 
 // The printed header, hardcoded on purpose to mirror the paper pad. This is
-// the ONE place the company's legal identity lives on the ticket.
-// TODO(content): replace the bracketed placeholders with the real registered
-// business name, office address and office email before tickets go out.
-const COMPANY = {
-  legalName: 'JON STUBBS TRUCKING',
-  sheetHeading: 'JON STUBBS TRUCKING HAUL TICKETS',
-  officeUseLabel: 'Jon Stubbs Trucking Office Use Only:',
-  addressLines: ['[Street address]', '[Suite / PO Box]', '[City, ST ZIP]'],
-  officeEmail: 'office@jonstubbstrucking.com',
-  markPath: 'public/brand/jst-mark.png',
+// the ONE place the company's identity lives on the ticket — copied from the
+// pad itself.
+export const COMPANY = {
+  name: 'Jon Stubbs Trucking',
+  addressLine: '60 SOUTH SLANT RD MAPLETON, UTAH 84664',
+  phoneLine: 'TRUCKING: JON - 801-428-7222   OFFICE: JEN - 801-919-4404, MEGAN - 435-681-0144',
+  emailLine: 'EMAIL: JONSTUBBSTRUCKINGLLC@GMAIL.COM',
 };
+
+// The fine print at the foot of the pad, word for word.
+const FINANCE_TERMS =
+  'This account is due and payable on the 15th of each month. If the account becomes delinquent, '
+  + '15th of the following month, I or we, the undersigned agree to pay a FINANCE CHARGE AT THE RATE OF '
+  + '2% PER MONTH WHICH IS 24% PER ANNUM, before and after judgement, until paid. That if this account is '
+  + 'placed in the hands of an attorney for collection, with or without suit, to pay a reasonable attorney\'s fee.';
+const DELIVERY_TERMS =
+  'I understand that loaded trucks can cause damage to concrete, landscaping, sprinkler systems, and other '
+  + 'items that may be on property designated for delivery and I, therefore, specifically agree to hold '
+  + `${COMPANY.name} and its agent harmless for any damage caused by movement of the delivery vehicle while `
+  + `accessing or egressing the location I have designated delivery. ${COMPANY.name} will pay Lessor within `
+  + '10 days of receiving payment from contractor.';
 
 const BUCKET = 'work-tickets';
 
 const INK = rgb(0, 0, 0);
-const GRAY = rgb(0.85, 0.85, 0.85);
+const GRAY = rgb(0.88, 0.88, 0.88);
 
+const DAY_LABELS = ['SUN', 'MON', 'TUES', 'WED', 'THURS', 'FRI', 'SAT'];
+
+// "7:30 AM" — the START/END lines and the totals.
 const fmtClock = (iso: string | null) => {
   if (!iso) return '';
   const d = new Date(iso);
@@ -45,12 +61,33 @@ const fmtClock = (iso: string | null) => {
   h = ((h + 11) % 12) + 1;
   return `${h}:${String(d.getMinutes()).padStart(2, '0')} ${mer}`;
 };
+// "7:30a" — the load table, where a cell holds two of them.
+const fmtShort = (iso: string | null) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  let h = d.getHours();
+  const mer = h >= 12 ? 'p' : 'a';
+  h = ((h + 11) % 12) + 1;
+  return `${h}:${String(d.getMinutes()).padStart(2, '0')}${mer}`;
+};
 const fmtStamp = (iso: string | null) => {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${fmtClock(iso)}`;
 };
+// The day of the week the ticket's date falls on, as the pad's circled day.
+// job_date is a plain calendar date, so it's parsed as one — not as UTC
+// midnight, which would put a Monday on Sunday west of Greenwich.
+function dayIndex(jobDate: string | null): number | null {
+  if (!jobDate) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(jobDate);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(d.getTime()) ? null : d.getDay();
+}
+const hoursText = (n: number) => (n > 0 ? n.toFixed(2).replace(/\.?0+$/, '') : '');
 
 // Build the PDF bytes for one ticket.
 export async function buildTicketPdf(
@@ -63,219 +100,244 @@ export async function buildTicketPdf(
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const serif = await doc.embedFont(StandardFonts.TimesRoman);
+  const serifBold = await doc.embedFont(StandardFonts.TimesRomanBold);
 
-  const L = 36;   // outer box left
-  const R = 576;  // outer box right
+  const L = 40;   // outer left
+  const R = 572;  // outer right
 
   const text = (s: string, x: number, y: number, size = 8, f: PDFFont = font) => {
     if (s) page.drawText(s, { x, y, size, font: f, color: INK });
+  };
+  const centered = (s: string, cx: number, y: number, size: number, f: PDFFont) => {
+    if (s) text(s, cx - f.widthOfTextAtSize(s, size) / 2, y, size, f);
+  };
+  const rightAligned = (s: string, rx: number, y: number, size: number, f: PDFFont) => {
+    if (s) text(s, rx - f.widthOfTextAtSize(s, size), y, size, f);
   };
   const hline = (x1: number, x2: number, y: number, w = 0.7) =>
     page.drawLine({ start: { x: x1, y }, end: { x: x2, y }, thickness: w, color: INK });
   const vline = (x: number, y1: number, y2: number, w = 0.7) =>
     page.drawLine({ start: { x, y: y1 }, end: { x, y: y2 }, thickness: w, color: INK });
-  // A labeled fill-in line, the backbone of the paper form: bold label, a
-  // rule, and the value written on it.
-  const fill = (label: string, x: number, lineEnd: number, y: number, value: string | null, labelSize = 8) => {
-    text(label, x, y, labelSize, bold);
-    const lx = x + bold.widthOfTextAtSize(label, labelSize) + 3;
-    hline(lx, lineEnd, y - 1.5);
-    if (value) text(String(value).slice(0, 60), lx + 2, y + 1, 8.5);
+  const box = (x1: number, y1: number, x2: number, y2: number, w = 1) =>
+    page.drawRectangle({ x: x1, y: y1, width: x2 - x1, height: y2 - y1, borderColor: INK, borderWidth: w });
+  // A labeled fill-in line, the backbone of the paper form: a serif capitals
+  // label, a rule, and the value written on it. Returns where the rule
+  // starts so a signature can sit on it.
+  const fill = (label: string, x: number, lineEnd: number, y: number, value: string | null, labelSize = 8, valueSize = 8.5) => {
+    text(label, x, y, labelSize, serifBold);
+    const lx = x + serifBold.widthOfTextAtSize(label, labelSize) + 4;
+    hline(lx, lineEnd, y - 1.5, 0.6);
+    if (value) {
+      // Trim to the line rather than running past it.
+      let v = String(value);
+      while (v.length > 1 && font.widthOfTextAtSize(v, valueSize) > lineEnd - lx - 4) v = v.slice(0, -1);
+      text(v, lx + 2, y + 0.5, valueSize);
+    }
     return lx;
   };
-  const checkbox = (x: number, y: number, label: string, checked: boolean, extra = '') => {
-    page.drawRectangle({ x, y: y - 1, width: 8, height: 8, borderColor: INK, borderWidth: 0.8 });
-    if (checked) text('X', x + 1.5, y + 0.5, 7.5, bold);
-    text(label + extra, x + 12, y, 7.5, bold);
+  // Word-wrap a paragraph to a width, at most `max` lines.
+  const wrap = (s: string, f: PDFFont, size: number, width: number, max = 50): string[] => {
+    const out: string[] = [];
+    let line = '';
+    for (const w of s.replace(/\s+/g, ' ').trim().split(' ')) {
+      const probe = line ? `${line} ${w}` : w;
+      if (f.widthOfTextAtSize(probe, size) <= width) { line = probe; continue; }
+      if (line) out.push(line);
+      line = w;
+      if (out.length >= max) break;
+    }
+    if (line && out.length < max) out.push(line);
+    return out.slice(0, max);
   };
 
-  // ---- Header (outside the box, like the paper) ----
-  text(COMPANY.addressLines[0] || '', L + 4, 762, 7.5, bold);
-  text(COMPANY.addressLines[1] || '', L + 4, 753, 7.5, bold);
-  text(COMPANY.addressLines[2] || '', L + 4, 744, 7.5, bold);
-  text(COMPANY.officeEmail, L + 4, 735, 7, bold);
-  const title = COMPANY.legalName;
-  // Scale the name down so a long one still clears the address block and
-  // the mark on either side of it.
-  const titleSize = Math.min(28, Math.floor((360 / serif.widthOfTextAtSize(title, 28)) * 28));
-  const tw = serif.widthOfTextAtSize(title, titleSize);
-  text(title, (612 - tw) / 2, 740, titleSize, serif);
-  try {
-    // Runtime-only import: this module is reachable from client bundles via
-    // lib/work-orders, and a static 'fs' import breaks the build there. This
-    // code only ever runs on the server.
-    const { readFile } = await import(/* webpackIgnore: true */ 'node:fs/promises');
-    const logoBytes = await readFile(`${process.cwd()}/${COMPANY.markPath}`);
-    const logo = await doc.embedPng(new Uint8Array(logoBytes));
-    const s = Math.min(58 / logo.width, 58 / logo.height);
-    page.drawImage(logo, { x: R - 62, y: 726, width: logo.width * s, height: logo.height * s });
-  } catch { /* the words carry the header if the mark can't load */ }
+  // ---- Header, as printed on the pad ----
+  centered(COMPANY.name, 306, 760, 22, serifBold);
+  centered(COMPANY.addressLine, 306, 746, 8, serifBold);
+  centered(COMPANY.phoneLine, 306, 735, 8, serifBold);
+  centered(COMPANY.emailLine, 306, 724, 8, serifBold);
+  // The pre-printed ticket number, top right.
+  rightAligned(wo.ticket_number || '', R - 2, 756, 12, font);
 
-  // ---- Outer box ----
-  const boxTop = 716;
-  const boxBottom = 42;
-  page.drawRectangle({ x: L, y: boxBottom, width: R - L, height: boxTop - boxBottom, borderColor: INK, borderWidth: 1.2 });
+  // ---- The two header boxes ----
+  const hbTop = 712;
+  const hbBottom = 604;
+  const midGap = 304;
+  box(L, hbBottom, midGap - 2, hbTop);
+  box(midGap + 2, hbBottom, R, hbTop);
 
-  const heading = COMPANY.sheetHeading;
-  const hw = bold.widthOfTextAtSize(heading, 10.5);
-  text(heading, (612 - hw) / 2, boxTop - 16, 10.5, bold);
+  // Left: who, where, what.
+  let y = hbTop - 17;
+  const lx = L + 8;
+  const lEnd = midGap - 10;
+  fill('CARRIER NAME', lx, lEnd, y, wo.trucking_company); y -= 15.4;
+  fill('CONTRACTOR NAME', lx, lEnd, y, wo.customer_number); y -= 15.4;
+  fill('PIT ADDRESS', lx, lEnd, y, wo.pit_address); y -= 15.4;
+  fill('JOB NAME', lx, lEnd, y, wo.job_name); y -= 15.4;
+  fill('JOB ADDRESS', lx, lEnd, y, wo.job_address); y -= 15.4;
+  fill('MATERIAL', lx, lEnd, y, wo.material);
 
-  // ---- Field lines ----
-  const lx = L + 12;
-  const mid = 372;
-  let y = boxTop - 36;
-  fill('Drivers Name', lx, mid - 20, y, wo.driver_name);
-  fill('Date', mid, 468, y, wo.job_date);
-  fill('Ticket #', 478, R - 10, y, wo.ticket_number);
-  y -= 21;
-  fill('Trucking Company', lx, mid - 20, y, wo.trucking_company);
-  fill('Truck#', mid, R - 10, y, wo.unit_number);
-  y -= 21;
-  fill('Customer', lx, mid - 20, y, wo.customer_number);
-  fill('Job#', mid, R - 10, y, wo.job_number);
-  y -= 21;
-  fill('Job Address', lx, mid - 20, y, wo.job_address);
-  fill('Phase#', mid, R - 10, y, wo.phase_code);
-  y -= 21;
-  fill('Material', lx, 200, y, wo.material);
-  fill('Supplier', 210, mid - 20, y, wo.supplier);
-  text('Driver Time:', mid, y + 9, 6.5);
-  fill('START', mid, 468, y, fmtClock(wo.driver_start_at), 7.5);
-  fill('END', 478, R - 10, y, fmtClock(wo.driver_end_at), 7.5);
-
-  // ---- Truck type: the check-one grid ----
-  y -= 26;
-  text('Truck Type:', lx, y, 8.5, bold);
-  text('(Check One)', lx, y - 16, 6);
-  const t = (wo.truck_type || '').trim();
-  const col1 = 150; const col2 = 315; const col3 = 465;
-  checkbox(col1, y, 'Truck & Pup', t === 'Truck & Pup');
-  checkbox(col2, y, 'Double Belly', t === 'Double Belly');
-  checkbox(col3, y, '6 Axel SS or DS', t === '6 Axel SS or DS');
-  y -= 15;
-  checkbox(col1, y, 'StrongArm', t === 'StrongArm',
-    `___${t === 'StrongArm' && wo.truck_type_tons != null ? wo.truck_type_tons : ''}Tn`);
-  checkbox(col2, y, 'Single Belly', t === 'Single Belly');
-  checkbox(col3, y, 'Super Side', t === 'Super Side');
-  y -= 15;
-  checkbox(col1, y, 'End Dump', t === 'End Dump',
-    `___${t === 'End Dump' && wo.truck_type_tons != null ? wo.truck_type_tons : ''}Tn`);
-  checkbox(col2, y, 'Vacuum Trailer', t === 'Vacuum Trailer');
-  checkbox(col3, y, 'Single Side', t === 'Single Side');
-  y -= 17;
-  // "Other" is for a truck type that isn't on the printed list — a checked
-  // box already answers the question.
-  const KNOWN = ['Truck & Pup', 'Double Belly', '6 Axel SS or DS', 'StrongArm', 'Single Belly', 'Super Side', 'End Dump', 'Vacuum Trailer', 'Single Side'];
-  fill('Other:', lx + 24, R - 60, y, t && !KNOWN.includes(t) ? t : '', 7.5);
-
-  // ---- The sixteen-line load table ----
-  y -= 14;
-  const cols = [48, 100, 210, 283, 356, 429, 502, 564];
-  const groupH = 13;
-  const headH = 13;
-  const rowH = 15.2;
-  const tableTop = y;
-  // Group header: LOAD TIME over cols 2-3, UNLOAD TIME over 4-5, shaded.
-  page.drawRectangle({ x: cols[2], y: tableTop - groupH, width: cols[4] - cols[2], height: groupH, color: GRAY });
-  page.drawRectangle({ x: cols[4], y: tableTop - groupH, width: cols[6] - cols[4], height: groupH, color: GRAY });
-  text('LOAD TIME', cols[2] + (cols[4] - cols[2]) / 2 - 24, tableTop - 10, 8);
-  text('UNLOAD TIME', cols[4] + (cols[6] - cols[4]) / 2 - 29, tableTop - 10, 8);
-  const headY = tableTop - groupH;
-  const heads = ['Load #', 'Ticket #', 'IN', 'OUT', 'IN', 'OUT', 'TONS'];
-  heads.forEach((h, i) => text(h, cols[i] + 3, headY - 10, i >= 2 && i <= 5 ? 8 : 7.5, bold));
-  const bodyTop = headY - headH;
-  const byNo = new Map(loads.map((l) => [l.load_no, l]));
-  for (let i = 0; i < 16; i++) {
-    const rowY = bodyTop - (i + 1) * rowH;
-    const l = byNo.get(i + 1);
-    text(String(i + 1), cols[0] + 20, rowY + 4, 8, bold);
-    if (l) {
-      text(l.ticket_number || '', cols[1] + 3, rowY + 4, 8);
-      text(fmtClock(l.load_in_at), cols[2] + 3, rowY + 4, 8);
-      text(fmtClock(l.load_out_at), cols[3] + 3, rowY + 4, 8);
-      text(fmtClock(l.unload_in_at), cols[4] + 3, rowY + 4, 8);
-      text(fmtClock(l.unload_out_at), cols[5] + 3, rowY + 4, 8);
-      if (l.tons != null) text(Number(l.tons).toFixed(2), cols[6] + 3, rowY + 4, 8);
+  // Right: the day circled, then the driver and the truck.
+  const rx = midGap + 10;
+  const rEnd = R - 8;
+  y = hbTop - 13;
+  const today = dayIndex(wo.job_date);
+  const slot = (rEnd - rx) / DAY_LABELS.length;
+  DAY_LABELS.forEach((d, i) => {
+    const cx = rx + slot * i + slot / 2;
+    centered(d, cx, y, 7.5, serifBold);
+    if (today === i) {
+      page.drawEllipse({
+        x: cx, y: y + 2.6,
+        xScale: serifBold.widthOfTextAtSize(d, 7.5) / 2 + 4, yScale: 6,
+        borderColor: INK, borderWidth: 0.9,
+      });
     }
-  }
-  const tableBottom = bodyTop - 16 * rowH;
-  // Rules. The IN/OUT dividers stop under the group header, which spans them
-  // — exactly how the paper table is ruled.
-  for (const x of cols) {
-    const top = x === cols[3] || x === cols[5] ? headY : tableTop;
-    vline(x, tableBottom, top);
-  }
-  hline(cols[0], cols[7], tableTop);
-  hline(cols[0], cols[7], headY);
-  for (let i = 0; i <= 16; i++) hline(cols[0], cols[7], bodyTop - i * rowH);
+  });
+  y -= 12.4;
+  fill('DATE', rx, rEnd, y, wo.job_date); y -= 12.4;
+  fill('DRIVER', rx, rEnd, y, wo.driver_name); y -= 12.4;
+  fill('TRUCK NO.', rx, rEnd, y, wo.unit_number); y -= 12.4;
+  fill('TYPE OF TRUCK', rx, rEnd, y, wo.truck_type); y -= 12.4;
+  fill('PLATE #', rx, rEnd, y, wo.plate_number); y -= 12.4;
+  // Two START/END rows, like the pad: the billable haul first (what the
+  // stamps and the totals run on), then the driver's own clock if it
+  // differs or the day split in two.
+  const rMid = rx + (rEnd - rx) / 2;
+  fill('START', rx, rMid - 8, y, fmtClock(wo.start_at), 8, 8);
+  fill('END', rMid, rEnd, y, fmtClock(wo.stop_at), 8, 8);
+  y -= 12.4;
+  fill('START', rx, rMid - 8, y, fmtClock(wo.driver_start_at), 8, 8);
+  fill('END', rMid, rEnd, y, fmtClock(wo.driver_end_at), 8, 8);
 
-  // ---- Job Time ----
-  let jy = tableBottom - 14;
-  text('Job Time:', L + 6, jy, 8.5, bold);
-  jy -= 15;
-  fill('Start Haul', lx, 150, jy, fmtClock(wo.start_at), 7.5);
-  fill('End Haul', 158, 250, jy, fmtClock(wo.stop_at), 7.5);
-  fill('Travel Time', 258, 348, jy, wo.travel_hours != null ? String(wo.travel_hours) : '', 7.5);
-  fill('Downtime', 356, 438, jy, wo.down_hours != null ? String(wo.down_hours) : '', 7.5);
-  fill('Total Hrs', 446, R - 10, jy, totalHours(wo) > 0 ? totalHours(wo).toFixed(2) : '', 7.5);
-  jy -= 17;
-  const sigImgW = 110; const sigImgH = 22;
-  fill('Total Loads', lx, 170, jy, String(countLoads(loads) || ''), 7.5);
-  fill('Total Tons Hauled', 178, 330, jy, totalLoadTons(loads) > 0 ? totalLoadTons(loads).toFixed(2) : '', 7.5);
-  const dsx = fill('Drivers Signature', 338, R - 10, jy, '', 7.5);
-  await drawSigOnLine(db, doc, page, wo.signature_path, dsx, jy, sigImgW, sigImgH);
-  if (wo.signature_name) {
-    text(`${wo.signature_name} · ${fmtStamp(wo.signature_signed_at)}`, dsx + 2, jy - 8, 6.5);
-  }
-  jy -= 19;
-  text('Signed Out:', lx, jy, 8, bold);
-  const so = wo.signed_out_state;
-  text('Loaded', lx + 52, jy, 8, so === 'loaded' ? bold : font);
-  if (so === 'loaded') hline(lx + 50, lx + 81, jy - 2, 1);
-  text('Or', lx + 88, jy, 8);
-  text('Empty', lx + 103, jy, 8, so === 'empty' ? bold : font);
-  if (so === 'empty') hline(lx + 101, lx + 128, jy - 2, 1);
-  fill('Sign Out Time', 182, 300, jy, fmtClock(wo.sign_out_at), 7.5);
-  const fsx = fill('Foreman Signature', 338, R - 10, jy, '', 7.5);
-  await drawSigOnLine(db, doc, page, wo.foreman_signature_path, fsx, jy, sigImgW, sigImgH);
-  if (wo.foreman_signature_name) {
-    text(`${wo.foreman_signature_name} · ${fmtStamp(wo.foreman_signature_signed_at)}`, fsx + 2, jy - 8, 6.5);
-  }
+  // ---- The load table: two blocks of fourteen, safety check down the side ----
+  const tTop = hbBottom - 8;          // 604
+  const headH = 12;
+  const rowH = 15.5;
+  const perBlock = MAX_LOADS / 2;     // 14
+  const bodyTop = tTop - headH;
+  const tBottom = bodyTop - perBlock * rowH;
+  const blockW = 210;
+  const blockX = [L, L + blockW + 6];
+  const colOff = [0, 22, 78, 128, 166, blockW];
+  const heads = ['LOAD #', 'LOAD TIME', 'TICKET', 'TONS', 'MATERIAL'];
+  const byNo = new Map(loads.map((l) => [l.load_no, l]));
 
-  // ---- Office use band ----
-  jy -= 15;
-  page.drawRectangle({ x: L, y: jy - 20, width: R - L, height: 28, color: GRAY });
-  text(COMPANY.officeUseLabel, L + 6, jy, 8, bold);
-  jy -= 13;
-  fill('Start Haul', lx, 150, jy, fmtClock(wo.office_start_haul), 7.5);
-  fill('End Haul', 158, 260, jy, fmtClock(wo.office_end_haul), 7.5);
-  fill('Travel Time', 268, 390, jy, wo.office_travel_hours != null ? String(wo.office_travel_hours) : '', 7.5);
-  fill('Total Hrs Billed', 398, R - 10, jy, wo.office_total_hours != null ? String(wo.office_total_hours) : '', 7.5);
-
-  // ---- Comments ----
-  jy -= 16;
-  text('Comments:', L + 6, jy, 8.5, bold);
-  const commentTop = jy - 4;
-  const notes = [wo.notes, wo.office_comments].filter(Boolean).join('  ·  ');
-  const words = notes ? notes.replace(/\s+/g, ' ').trim().split(' ') : [];
-  let line = '';
-  let li = 0;
-  const commentLines: string[] = [];
-  for (const w of words) {
-    if ((line + ' ' + w).length > 118) { commentLines.push(line); line = w; if (commentLines.length >= 3) break; }
-    else line = line ? `${line} ${w}` : w;
-  }
-  if (line && commentLines.length < 3) commentLines.push(line);
-  for (li = 0; li < 3; li++) {
-    const cy = commentTop - 12 - li * 12;
-    hline(L + 6, R - 6, cy - 2, 0.5);
-    if (commentLines[li]) text(commentLines[li], L + 8, cy, 7.5);
+  for (let b = 0; b < 2; b++) {
+    const x0 = blockX[b];
+    const cols = colOff.map((o) => x0 + o);
+    // Header row, shaded like the pad.
+    page.drawRectangle({ x: x0, y: bodyTop, width: blockW, height: headH, color: GRAY });
+    heads.forEach((h, i) => centered(h, (cols[i] + cols[i + 1]) / 2, bodyTop + 3.5, 5.5, serifBold));
+    for (let i = 0; i < perBlock; i++) {
+      const no = b * perBlock + i + 1;
+      const rowY = bodyTop - (i + 1) * rowH;
+      const l = byNo.get(no);
+      centered(String(no), (cols[0] + cols[1]) / 2, rowY + 4.5, 9, serif);
+      if (l) {
+        // The time loaded, and when it was dumped — the first and last stamp
+        // on the line, so a reader sees the whole run at a glance.
+        const inAt = fmtShort(l.load_in_at);
+        const outAt = fmtShort(l.unload_out_at || l.unload_in_at);
+        const when = inAt && outAt ? `${inAt}-${outAt}` : (inAt || outAt || fmtShort(l.load_out_at));
+        text(when, cols[1] + 2, rowY + 5, 6.5);
+        text((l.ticket_number || '').slice(0, 12), cols[2] + 2, rowY + 5, 7);
+        if (l.tons != null) text(Number(l.tons).toFixed(2), cols[3] + 2, rowY + 5, 7);
+        // The pad's ditto mark: a load with no material of its own carried
+        // what the ticket says.
+        const mat = l.material || (countLoads([l]) ? wo.material : null) || '';
+        text(mat.slice(0, 10), cols[4] + 2, rowY + 5, 6.5);
+      }
+    }
+    // Rules.
+    for (const x of cols) vline(x, tBottom, tTop);
+    hline(x0, x0 + blockW, tTop);
+    hline(x0, x0 + blockW, bodyTop);
+    for (let i = 1; i <= perBlock; i++) hline(x0, x0 + blockW, bodyTop - i * rowH, 0.5);
   }
 
-  // ---- Footer bar, as printed on the pads ----
-  page.drawRectangle({ x: L, y: boxBottom, width: R - L, height: 14, borderColor: INK, borderWidth: 1 });
-  text('White Copy- Office', L + 20, boxBottom + 4, 7.5);
-  text('Yellow Copy- Job Supervisor/Foreman', 280, boxBottom + 4, 7.5);
+  // The safety check column.
+  const sX = blockX[1] + blockW + 6;
+  box(sX, tBottom, R, tTop);
+  const sMid = (sX + R) / 2;
+  centered('DRIVERS DAILY SAFETY CHECK', sMid, tTop - 10, 5.6, serifBold);
+  const ticked = new Set(wo.safety_check || []);
+  let sy = tTop - 20.5;
+  for (const item of SAFETY_CHECK_ITEMS) {
+    rightAligned(item.label.toUpperCase(), R - 16, sy, 4.9, serifBold);
+    hline(R - 14, R - 3, sy - 1, 0.5);
+    if (ticked.has(item.key)) text('X', R - 11, sy - 0.3, 6, bold);
+    sy -= 7.3;
+  }
+  sy -= 1;
+  for (const line of wrap('DRIVER MUST REPORT MECHANICAL DEFECTS TO SHOP SUPERVISOR BEFORE DRIVING VEHICLE', serifBold, 4.6, R - sX - 8, 4)) {
+    rightAligned(line, R - 4, sy, 4.6, serifBold); sy -= 5.4;
+  }
+  sy -= 2;
+  for (const line of wrap('I HAVE CHECKED EACH ITEM ON THE ABOVE LIST AND WILL REPORT TO THE SHOP FOREMAN ANY DEFECTS FOUND.', serifBold, 4.6, R - sX - 8, 5)) {
+    rightAligned(line, R - 4, sy, 4.6, serifBold); sy -= 5.4;
+  }
+  sy = Math.min(sy - 2, tBottom + 14);
+  rightAligned('DRIVER\'S INITIALS', R - 4, sy, 4.9, serifBold);
+  hline(sX + 6, R - 4, tBottom + 4, 0.6);
+  if (wo.safety_initials) centered(wo.safety_initials.slice(0, 6), sMid, tBottom + 5.5, 9, font);
+
+  // ---- Totals and notes ----
+  const nTop = tBottom - 6;
+  const nBottom = nTop - 80;
+  box(L, nBottom, blockX[1] - 6, nTop);
+  box(blockX[1], nBottom, R, nTop);
+  let ty = nTop - 14;
+  const tEnd = blockX[1] - 14;
+  const truckHours = onSiteHours(wo.start_at, wo.stop_at);
+  fill('TOTAL LOADS', lx, tEnd, ty, String(countLoads(loads) || ''), 9, 9); ty -= 15.5;
+  fill('TRUCK HOURS', lx, tEnd, ty, hoursText(truckHours), 9, 9); ty -= 15.5;
+  fill('TRAVEL TIME', lx, tEnd, ty, wo.travel_hours != null ? hoursText(Number(wo.travel_hours)) : '', 9, 9); ty -= 15.5;
+  fill('TOTAL HOURS', lx, tEnd, ty, hoursText(totalHours(wo)), 9, 9); ty -= 15.5;
+  fill('LAST LOAD UNLOADED', lx, tEnd, ty, fmtClock(lastUnloadAt(loads)), 9, 9);
+
+  // Notes: the driver's, the office's, and anything the pad has no line for.
+  const extras: string[] = [];
+  if (Number(wo.down_hours || 0) > 0) extras.push(`Down time ${hoursText(Number(wo.down_hours))} hrs`);
+  if (wo.tonnage != null && Number(wo.tonnage) > 0 && loads.every((l) => l.tons == null)) {
+    extras.push(`Tonnage ${Number(wo.tonnage).toFixed(2)} ${wo.tonnage_type || ''}`.trim());
+  }
+  const notes = [wo.notes, wo.office_comments, ...extras].filter(Boolean).join('  ·  ');
+  const noteX = blockX[1] + 8;
+  const noteLabelW = serifBold.widthOfTextAtSize('NOTES', 9) + 6;
+  const noteLines = wrap(notes, font, 7, R - noteX - noteLabelW - 10, 5);
+  text('NOTES', noteX, nTop - 14, 9, serifBold);
+  for (let i = 0; i < 5; i++) {
+    const ly = nTop - 14 - i * 15.5;
+    hline(i === 0 ? noteX + noteLabelW : noteX, R - 8, ly - 1.5, 0.5);
+    if (noteLines[i]) text(noteLines[i], (i === 0 ? noteX + noteLabelW : noteX) + 2, ly + 0.5, 7);
+  }
+
+  // ---- Terms and signatures ----
+  const kTop = nBottom - 6;
+  const kBottom = kTop - 122;
+  box(L, kBottom, R, kTop);
+  let ky = kTop - 11;
+  for (const line of wrap(FINANCE_TERMS, font, 6.3, R - L - 16, 4)) { text(line, L + 8, ky, 6.3); ky -= 7.4; }
+  ky -= 6;
+  text('DELIVERY TERMS AND CONDITIONS', L + 8, ky, 6.6, bold); ky -= 8;
+  for (const line of wrap(DELIVERY_TERMS, font, 6.3, R - L - 16, 4)) { text(line, L + 8, ky, 6.3); ky -= 7.4; }
+
+  // The signature line: foreman, the time they signed, driver.
+  const sigY = kBottom + 34;
+  const sigImgH = 24;
+  const fsx = fill('JOB FOREMAN\'S SIGNATURE', L + 8, 252, sigY, '', 7);
+  await drawSigOnLine(db, doc, page, wo.foreman_signature_path, fsx, sigY, 252 - fsx - 6, sigImgH);
+  if (wo.foreman_signature_name) text(`${wo.foreman_signature_name} · ${fmtStamp(wo.foreman_signature_signed_at)}`, fsx + 2, sigY - 8, 5.5);
+  fill('TIME', 260, 330, sigY, fmtClock(wo.foreman_signature_signed_at), 7, 7.5);
+  const dsx = fill('DRIVER\'S SIGNATURE', 338, R - 8, sigY, '', 7);
+  await drawSigOnLine(db, doc, page, wo.signature_path, dsx, sigY, R - 8 - dsx - 6, sigImgH);
+  if (wo.signature_name) text(`${wo.signature_name} · ${fmtStamp(wo.signature_signed_at)}`, dsx + 2, sigY - 8, 5.5);
+
+  // The carbon-copy legend along the bottom of the box.
+  const legendY = kBottom + 6;
+  text('WHITE- BILLING', 150, legendY, 6.5, serifBold);
+  text('YELLOW-TRUCK COPY', 262, legendY, 6.5, serifBold);
+  text('PINK-CUSTOMER COPY', 392, legendY, 6.5, serifBold);
 
   return doc.save();
 }

@@ -138,19 +138,31 @@ inherited from the source app; retune it to the real logo. The app name is in
 
 ### 6 — Fill in the company details (before the first real ticket)
 
-Every place that carries the company's identity is already renamed. These
-still hold bracketed placeholders that need the real values:
+Every place that carries the company's identity is already renamed, and the
+header, address, phones and email were copied off the paper pad:
 
-- `lib/ticket-pdf.ts` → the `COMPANY` constant at the top: registered legal
-  name, office address lines, office email. This prints on every ticket PDF.
-- `app/legal/terms/page.tsx` and `app/legal/privacy/page.tsx` → the Contact
-  blocks (also check the governing-law / venue clause in the terms, which was
-  written for a Utah entity).
-- `app/home/page.tsx` → About copy and the Contact section.
-- `lib/webpush.ts` → `VAPID_SUBJECT` fallback address (or set the env var).
-- The production domain: `.env.local.example`, `lib/quickbooks.ts` comment,
-  and `app/api/quickbooks/authorize/route.ts` fallback all assume
-  `jon-stubbs-trucking.vercel.app` until the real domain is known.
+- `lib/ticket-pdf.ts` → the `COMPANY` constant at the top is the printed
+  header (60 South Slant Rd, Mapleton; Jon / Jen / Megan's numbers; the gmail
+  address). Change it there if the pad changes. The fine print at the foot
+  (finance charge, delivery terms) is also in that file, word for word.
+- `app/legal/terms/page.tsx`, `app/legal/privacy/page.tsx` and
+  `app/home/page.tsx` → Contact blocks carry the same details. The About copy
+  on the home page is still generic — write the real paragraph when ready.
+- Still placeholders: the production domain (`.env.local.example`,
+  `lib/quickbooks.ts` comment, `app/api/quickbooks/authorize/route.ts`
+  fallback all assume `jon-stubbs-trucking.vercel.app`) and the brand images.
+
+### The haul ticket
+
+The ticket form and the generated PDF mirror the Jon Stubbs Trucking pad:
+carrier / contractor / pit address / job name / job address / material on the
+left, the circled weekday, date, driver, truck no., type of truck, plate # and
+two START/END lines on the right, 28 load lines (load time, ticket, tons,
+material) in two columns, the driver's daily safety check with initials,
+totals (loads, truck hours, travel, total hours, last load unloaded), notes,
+and the terms with the job foreman's and driver's signatures. Every load line
+still takes the four one-tap GPS stamps (load in/out, unload in/out); the PDF
+prints the first and last of them as the load time.
 
 ### 7 — Connect to Auto 1 Funding
 
@@ -184,7 +196,7 @@ project it is a no-op.
 | `app/haulers` | The office's hauler directory, fleets, and dispatch |
 | `app/hauler` | A hauler's own loads, equipment and availability |
 | `lib/haulers.ts` | Load statuses, availability math, the editable allowlist |
-| `components/LoadLines.tsx` | The sixteen load lines and their one-tap GPS stamps |
+| `components/LoadLines.tsx` | The twenty-eight load lines and their one-tap GPS stamps |
 | `app/api/work-orders` | Ticket CRUD, approvals, invoicing |
 | `app/admin` | Dispatch board, customers, hours, users, PO log, QuickBooks |
 | `lib/work-orders.ts` | Hour/amount math and the QuickBooks invoice routine |

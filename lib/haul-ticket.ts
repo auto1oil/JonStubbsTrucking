@@ -52,9 +52,10 @@ export async function startHaulTicket(
           (unit as { equipment_type: string | null } | null)?.equipment_type ?? load.equipment_type,
         job_number: load.job_number,
         job_name: load.job_name,
-        job_address: load.pickup && load.dropoff
-          ? `${load.pickup} → ${load.dropoff}`
-          : (load.pickup || load.dropoff),
+        // The paper ticket has a line for each end of the run: the pit the
+        // material is loaded at and the job it goes to.
+        pit_address: load.pickup,
+        job_address: load.dropoff || load.pickup,
         phase_code: load.phase_code,
         job_date: load.job_date,
         // What the hauler is owed. Never the customer's rate — that lives on

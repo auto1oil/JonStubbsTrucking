@@ -30,8 +30,8 @@ A staff-facing summary of what the app does today. Updated as new features ship.
   amount are calculated as you type, so nothing is added up by hand
 - **Tonnage** and tonnage type for tonnage-priced jobs (they bill tonnage ×
   rate instead of hours × rate)
-- **Sixteen load lines**, same as the paper ticket — per load a scale ticket
-  number, the tons, and **one-tap in and out times**: load in, load out,
+- **Twenty-eight load lines**, same as the paper ticket — per load a scale ticket
+  number, the tons, the material, and **one-tap in and out times**: load in, load out,
   unload in, unload out. Each tap stamps the time *and* the GPS fix from the
   phone, so where the truck was is on the record next to when
 - The time is taken and shown the instant the button is pressed; the fix is

@@ -84,13 +84,11 @@ export default function PrivacyPolicyPage() {
 
         <h2 className="text-lg font-semibold mt-6 mb-2">Contact us</h2>
         <p className="text-sm leading-6">
-          {/* TODO(content): the real registered business name, address,
-              phone and email before this page is published. */}
           Jon Stubbs Trucking<br />
-          [Street address]<br />
-          [City, State ZIP]<br />
-          Phone: [phone]<br />
-          Email: <a href="mailto:office@example.com" className="text-brand-700 hover:underline">office@example.com</a>
+          60 South Slant Rd<br />
+          Mapleton, UT 84664<br />
+          Trucking: Jon 801-428-7222 · Office: Jen 801-919-4404, Megan 435-681-0144<br />
+          Email: <a href="mailto:jonstubbstruckingllc@gmail.com" className="text-brand-700 hover:underline">jonstubbstruckingllc@gmail.com</a>
         </p>
       </main>
     </div>

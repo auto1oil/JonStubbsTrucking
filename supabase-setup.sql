@@ -3024,5 +3024,30 @@ create policy "login_events master admin read" on public.login_events
 
 
 -- ==========================================================================
+-- 49. The Jon Stubbs Trucking paper haul ticket — the fields it adds
+-- ==========================================================================
+-- The printed pad this app mirrors carries a few things the original ticket
+-- did not: where the material was loaded (the pit), the truck's plate, a
+-- material per load line (the driver writes it beside each load, with ditto
+-- marks), and the driver's daily safety check with their initials. Nothing
+-- here changes how a ticket bills — the money math still runs off the times,
+-- the load lines and the rate.
+-- ==========================================================================
+
+alter table public.work_orders add column if not exists pit_address      text;
+alter table public.work_orders add column if not exists plate_number     text;
+-- The items ticked on the "Drivers Daily Safety Check" column, by key (see
+-- SAFETY_CHECK_ITEMS in lib/work-orders.ts), plus the driver's initials.
+alter table public.work_orders add column if not exists safety_check     text[] not null default '{}';
+alter table public.work_orders add column if not exists safety_initials  text;
+
+-- What each load carried. Blank falls back to the ticket's material when the
+-- PDF prints — the paper's ditto mark.
+alter table public.work_order_loads add column if not exists material text;
+
+notify pgrst, 'reload schema';
+
+
+-- ==========================================================================
 -- DONE
 -- ==========================================================================
