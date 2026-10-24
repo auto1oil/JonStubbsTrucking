@@ -1,4 +1,4 @@
-// Service worker for the Auto 1 Oil Dispatch PWA.
+// Service worker for the Jon Stubbs Trucking PWA.
 //
 // Today this exists so the app is installable to a phone's home screen and
 // so the unread-count badge (navigator.setAppBadge) works on the installed
@@ -30,9 +30,9 @@ self.addEventListener('push', (event) => {
   try {
     data = event.data ? event.data.json() : {};
   } catch (e) {
-    data = { title: 'Auto 1 Oil', body: event.data ? event.data.text() : '' };
+    data = { title: 'Jon Stubbs Trucking', body: event.data ? event.data.text() : '' };
   }
-  const title = data.title || 'Auto 1 Oil';
+  const title = data.title || 'Jon Stubbs Trucking';
   const options = {
     body: data.body || '',
     icon: '/brand/jst-icon.png',
