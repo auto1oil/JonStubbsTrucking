@@ -111,7 +111,9 @@ async function postToFactoring(
 // Checks the SAVED endpoint, key and source against the funding app without
 // creating anything there: link-status only reads, so a made-up hauler id
 // just answers "none". The result is one plain sentence for the admin.
-export const FACTORING_SOURCE = 'jon-stubbs-trucking';
+// The name the funding app knows this app by. It must match the source the
+// funding app tied our API key to (its JONSTUBBS_WEBHOOK_KEY), not our slug.
+export const FACTORING_SOURCE = 'jonstubbs';
 
 export async function testFactoringConnection(
   db: SupabaseClient,

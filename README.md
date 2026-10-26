@@ -189,7 +189,7 @@ the screens are a convenience, not the boundary.
 
 ### 7 — Connect to Auto 1 Funding
 
-This app identifies itself to the funding hub as source `jon-stubbs-trucking`
+This app identifies itself to the funding hub as source `jonstubbs` (the `FACTORING_SOURCE` constant in `lib/factoring.ts`; it must match the name the funding app tied the key to)
 (every payload in `lib/factoring.ts`). Ask the funding app's admin for an
 endpoint URL (ending in `/tickets`) and an API key issued for that source,
 then paste both into **Work Orders → Setup → Factoring app** as the master
