@@ -58,7 +58,7 @@ async function buildTicketPayload(db: SupabaseClient, wo: WorkOrder) {
   return {
     loads,
     payload: {
-      source: 'jon-stubbs-trucking',
+      source: FACTORING_SOURCE,
       ticket_id: wo.id,
       // Haulers are matched by this id on the factoring side (name is their
       // fallback), and it's what their 403 gate keys on.
@@ -104,6 +104,65 @@ async function postToFactoring(
     });
   } finally {
     clearTimeout(timer);
+  }
+}
+
+// ---- "Test connection" on the Setup card -----------------------------------
+// Checks the SAVED endpoint, key and source against the funding app without
+// creating anything there: link-status only reads, so a made-up hauler id
+// just answers "none". The result is one plain sentence for the admin.
+export const FACTORING_SOURCE = 'jon-stubbs-trucking';
+
+export async function testFactoringConnection(
+  db: SupabaseClient,
+): Promise<{ ok: boolean; message: string }> {
+  const { data } = await db
+    .from('app_settings')
+    .select('key, value')
+    .in('key', [FACTORING_URL_KEY, FACTORING_KEY_KEY]);
+  const m = new Map(((data as { key: string; value: string }[]) || []).map((r) => [r.key, r.value]));
+  const url = (m.get(FACTORING_URL_KEY) || '').trim();
+  const apiKey = (m.get(FACTORING_KEY_KEY) || '').trim();
+  if (!url) return { ok: false, message: 'No endpoint saved yet — paste the tickets address and Save.' };
+  if (!apiKey) return { ok: false, message: 'No API key saved yet — paste the key and Save.' };
+  if (!/\/tickets\/?$/.test(url)) return { ok: false, message: 'The endpoint should end in /tickets.' };
+  const statusUrl = url.replace(/\/tickets\/?$/, '/link-status');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12_000);
+  let res: Response;
+  try {
+    res = await fetch(statusUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ source: FACTORING_SOURCE, hauler_id: '00000000-0000-0000-0000-000000000000' }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    const why = err instanceof Error && err.name === 'AbortError'
+      ? 'timed out after 12 seconds'
+      : (err instanceof Error ? err.message : 'network error');
+    return { ok: false, message: `Couldn't reach Auto 1 Funding: ${why}.` };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string } | null;
+  const detail = body?.error || body?.message || '';
+  if (res.status === 200 && body?.ok) {
+    return { ok: true, message: 'Connected — Auto 1 Funding accepted this app\'s key.' };
+  }
+  switch (res.status) {
+    case 401:
+      return { ok: false, message: 'Auto 1 Funding refused the key. Check it matches this app\'s key setting in the funding app, and that the funding app was redeployed after adding it.' };
+    case 400:
+      return { ok: false, message: `Auto 1 Funding answered 400${detail ? ` — ${detail}` : ''}. The key may belong to another app (the source and key must match).` };
+    case 503:
+      return { ok: false, message: 'Auto 1 Funding has no partner keys set — add the key there and redeploy.' };
+    case 404:
+      return { ok: false, message: 'Nothing at that address — check the endpoint.' };
+    default:
+      return { ok: false, message: `Auto 1 Funding answered ${res.status}${detail ? ` — ${detail}` : ''}.` };
   }
 }
 
@@ -166,7 +225,7 @@ export async function requestFactoringLink(
 
     const hauler = h as { name: string; mc_number: string | null; dot_number: string | null; contact_name: string | null; email: string | null; phone: string | null };
     const res = await postToFactoring(url, config.apiKey, {
-      source: 'jon-stubbs-trucking',
+      source: FACTORING_SOURCE,
       hauler_id: haulerId,
       name: hauler.name,
       mc_number: hauler.mc_number,
@@ -204,7 +263,7 @@ export async function checkFactoringLink(
     if (!config || !url) return { ok: true, status: await cached(), live: false, error: 'factoring app not connected' };
 
     const res = await postToFactoring(url, config.apiKey, {
-      source: 'jon-stubbs-trucking',
+      source: FACTORING_SOURCE,
       hauler_id: haulerId,
     });
     if (!res.ok) return { ok: true, status: await cached(), live: false, error: `factoring app answered ${res.status}` };
