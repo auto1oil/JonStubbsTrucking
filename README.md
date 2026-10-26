@@ -195,6 +195,28 @@ endpoint URL (ending in `/tickets`) and an API key issued for that source,
 then paste both into **Work Orders → Setup → Factoring app** as the master
 admin. Never reuse another app's key.
 
+**Live progress.** While a ticket from a hauler whose funding link is active
+is still open, every stamp, save or signature re-POSTs it to the same
+`/tickets` endpoint with `status: "in_progress"` (coalesced on the client so
+a run of taps sends once). The funding app should upsert by `ticket_id` and
+never open a deal from it — the `approved_ready_to_fund` send at approval
+does that and replaces the picture. On top of the shared ticket payload it
+carries:
+
+| Field | Meaning |
+| --- | --- |
+| `ticket_status` | `draft`, `submitted` (completed by the crew) or `rejected` (sent back) |
+| `started_at` / `ended_at` | the haul's Start/End, or the first load-in stamp |
+| `hours_so_far`, `loads_so_far`, `tons_so_far` | running totals off the ticket and its load lines |
+| `last_stamp_at`, `last_stamp_kind`, `last_stamp_load_no` | the newest GPS stamp: when, which (`load_in`, `load_out`, `unload_in`, `unload_out`), on which load |
+| `last_stamp_lat`, `last_stamp_lng` | where that stamp was taken |
+| `driver_signed_at`, `foreman_signed_at` | the typed-name signatures, once given |
+| `payment_method` | `factor`, `standard` or null until the hauler picks |
+| `updated_at` | the ticket row's last change |
+
+The office ticket page shows when the last picture landed
+(`factor_progress_sent_at`) or why it didn't (`factor_progress_error`).
+
 ---
 
 ## Converting an existing Auto 1 Dispatch project

@@ -3120,5 +3120,17 @@ notify pgrst, 'reload schema';
 
 
 -- ==========================================================================
+-- 51. Live progress to the funding app
+-- ==========================================================================
+-- While a linked hauler's ticket is still open, each change re-sends it to
+-- Auto 1 Funding as in-progress. These two columns record the last outcome
+-- so the office can see the feed is alive, or why it isn't.
+alter table public.work_orders add column if not exists factor_progress_sent_at timestamptz;
+alter table public.work_orders add column if not exists factor_progress_error   text;
+
+notify pgrst, 'reload schema';
+
+
+-- ==========================================================================
 -- DONE
 -- ==========================================================================

@@ -162,6 +162,21 @@ export default function OfficeWorkOrderPage({ params }: { params: { id: string }
       )}
       {factorMsg && <p className="text-sm text-gray-700 mb-3">{factorMsg}</p>}
 
+      {/* The live feed: while a linked hauler's ticket is still open, every
+          change goes to the funding app as in-progress. */}
+      {wo.hauler_id && ['draft', 'submitted', 'rejected'].includes(wo.status)
+        && (wo.factor_progress_sent_at || wo.factor_progress_error) && (
+        wo.factor_progress_error ? (
+          <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-3">
+            Live updates to Auto 1 Funding — the last one didn&apos;t land: {wo.factor_progress_error}. The next change tries again.
+          </p>
+        ) : (
+          <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-3 py-2 mb-3">
+            Live updates to Auto 1 Funding — last sent {new Date(wo.factor_progress_sent_at as string).toLocaleString()}.
+          </p>
+        )
+      )}
+
       <WorkOrderForm workOrder={wo} canApprove onSaved={setWo} />
     </div>
   );

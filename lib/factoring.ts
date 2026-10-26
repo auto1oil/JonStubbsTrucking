@@ -14,6 +14,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   billableQuantity, billableUnit, totalHours, totalLoadTons, countLoads,
+  LOAD_STAMPS,
   type WorkOrder, type WorkOrderLoad,
 } from '@/lib/work-orders';
 import { ensureTicketPdf } from '@/lib/ticket-pdf';
@@ -426,6 +427,102 @@ export async function sendTicketToFactoring(
       .update({ factor_sent_at: new Date().toISOString(), factor_error: null })
       .eq('id', workOrderId);
     return { ok: true };
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : 'could not reach the factoring app');
+  }
+}
+
+// ---- Live progress for the funding app --------------------------------------
+// While a ticket is still open, the funding app can watch it fill in: each
+// stamp, save or signature re-sends the same ticket payload with status
+// 'in_progress' and a few running totals. Only tickets from a hauler whose
+// Auto 1 Funding link is active go — the funder has no business seeing
+// anyone else's day. Idempotent per ticket_id: the funding app keeps the
+// latest picture and never opens a deal from it; the approval send does that.
+// Never blocks anything: the outcome is recorded on the row and the next
+// change tries again.
+const OPEN_STATUSES = ['draft', 'submitted', 'rejected'];
+
+export async function sendTicketProgress(
+  db: SupabaseClient,
+  workOrderId: string,
+): Promise<{ ok: boolean; sent: boolean; error?: string }> {
+  const record = async (patch: Record<string, unknown>) => {
+    await db.from('work_orders').update(patch).eq('id', workOrderId);
+  };
+  const fail = async (reason: string) => {
+    await record({ factor_progress_error: reason });
+    return { ok: false, sent: false, error: reason };
+  };
+
+  try {
+    const { data: row } = await db
+      .from('work_orders').select('*').eq('id', workOrderId).maybeSingle();
+    if (!row) return { ok: false, sent: false, error: 'ticket not found' };
+    const wo = row as WorkOrder;
+    // Not a hauler's ticket, or already past the office: nothing to report.
+    if (!wo.hauler_id || !OPEN_STATUSES.includes(wo.status)) return { ok: true, sent: false };
+
+    // The link gate, from the cache the other funding calls keep fresh. A
+    // company that has never been checked gets asked once, live.
+    const { data: h } = await db
+      .from('haulers')
+      .select('factoring_link_status, factoring_link_checked_at')
+      .eq('id', wo.hauler_id).maybeSingle();
+    const cached = h as { factoring_link_status: string | null; factoring_link_checked_at: string | null } | null;
+    let link = cached?.factoring_link_status || 'none';
+    if (!cached?.factoring_link_checked_at) link = (await checkFactoringLink(db, wo.hauler_id)).status;
+    if (link !== 'linked') return { ok: true, sent: false };
+
+    const config = await getFactoringConfig(db);
+    if (!config) return { ok: true, sent: false };
+
+    const { payload, loads } = await buildTicketPayload(db, wo);
+
+    // The latest stamp on the ticket — when, which, where.
+    type Stamp = { at: string; kind: string; load_no: number; lat: number | null; lng: number | null };
+    let last: Stamp | null = null;
+    let firstIn: string | null = null;
+    for (const l of loads) {
+      for (const st of LOAD_STAMPS) {
+        const at = l[`${st.key}_at`];
+        if (!at) continue;
+        if (st.key === 'load_in' && (!firstIn || at < firstIn)) firstIn = at;
+        if (!last || at > last.at) {
+          last = { at, kind: st.key, load_no: l.load_no, lat: l[`${st.key}_lat`], lng: l[`${st.key}_lng`] };
+        }
+      }
+    }
+
+    const res = await postToFactoring(config.url, config.apiKey, {
+      ...payload,
+      status: 'in_progress',
+      ticket_status: wo.status,
+      started_at: wo.start_at || firstIn,
+      ended_at: wo.stop_at,
+      hours_so_far: totalHours(wo),
+      loads_so_far: countLoads(loads),
+      tons_so_far: totalLoadTons(loads),
+      last_stamp_at: last?.at ?? null,
+      last_stamp_kind: last?.kind ?? null,
+      last_stamp_load_no: last?.load_no ?? null,
+      last_stamp_lat: last?.lat ?? null,
+      last_stamp_lng: last?.lng ?? null,
+      driver_signed_at: wo.signature_signed_at,
+      foreman_signed_at: wo.foreman_signature_signed_at,
+      payment_method: wo.payment_method,
+      updated_at: wo.updated_at,
+    });
+    if (res.status === 403) {
+      const gate = (await res.json().catch(() => null)) as { status?: string } | null;
+      const st = normalizeLinkStatus(gate ? { status: gate.status } : null);
+      if (st) await cacheLinkStatus(db, wo.hauler_id, st);
+      return fail(linkGateMessage(gate?.status));
+    }
+    if (!res.ok) return fail(`factoring app answered ${res.status}`);
+
+    await record({ factor_progress_sent_at: new Date().toISOString(), factor_progress_error: null });
+    return { ok: true, sent: true };
   } catch (err) {
     return fail(err instanceof Error ? err.message : 'could not reach the factoring app');
   }

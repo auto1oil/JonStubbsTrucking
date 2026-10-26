@@ -72,6 +72,17 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
   // instant even on a bad signal. Keyed "loadNo:stampKey".
   const [pending, setPending] = useState<Record<string, string>>({});
 
+  // Tell the funding app the ticket moved. Coalesced so a run of taps sends
+  // once; fire-and-forget, and the server decides whether this hauler's
+  // Auto 1 Funding link is active before anything leaves.
+  const pingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function pingProgress() {
+    if (pingTimer.current) clearTimeout(pingTimer.current);
+    pingTimer.current = setTimeout(() => {
+      fetch(`/api/work-orders/${workOrderId}/progress`, { method: 'POST', keepalive: true }).catch(() => null);
+    }, 4000);
+  }
+
   const refresh = useCallback(async () => {
     const { data } = await supabase
       .from('work_order_loads')
@@ -113,6 +124,7 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
     setPending((p) => { const n = { ...p }; delete n[pk]; return n; });
     if (err) { setError(err.message); return; }
     refresh();
+    pingProgress();
   }
 
   async function clearStamp(load: WorkOrderLoad, key: LoadStampKey) {
@@ -127,6 +139,7 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
     setBusy('');
     if (err) { setError(err.message); return; }
     refresh();
+    pingProgress();
   }
 
   async function setField(loadNo: number, field: 'ticket_number' | 'tons' | 'material', value: string) {
@@ -141,6 +154,7 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
         .insert({ work_order_id: workOrderId, load_no: loadNo, [field]: val });
       refresh();
     }
+    pingProgress();
   }
 
   async function removeLoad(load: WorkOrderLoad) {
@@ -149,6 +163,7 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
     await supabase.from('work_order_loads').delete().eq('id', load.id);
     setBusy('');
     refresh();
+    pingProgress();
   }
 
   const nextNo = loads.length ? Math.max(...loads.map((l) => l.load_no)) + 1 : 1;

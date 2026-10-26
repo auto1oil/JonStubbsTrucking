@@ -486,6 +486,8 @@ export default function WorkOrderForm({
       }
       setMsg(submit ? 'Completed — it\u2019s with the office now.' : 'Saved.');
       onSaved?.(json.work_order as WorkOrder);
+      // The funding app's live view, if this hauler is linked. Fire-and-forget.
+      fetch(`/api/work-orders/${json.work_order.id}/progress`, { method: 'POST', keepalive: true }).catch(() => null);
       if (!id) router.replace(`/tickets/${json.work_order.id}`);
       else router.refresh();
     } catch {
