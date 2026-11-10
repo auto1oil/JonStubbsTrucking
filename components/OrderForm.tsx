@@ -145,11 +145,11 @@ export default function OrderForm({ order }: { order: JobOrder | null }) {
           <label><span className={label}>Phase code</span>
             <input value={draft.phase_code} onChange={(e) => set('phase_code', e.target.value)} className={input} />
           </label>
-          <label className="col-span-2 sm:col-span-3"><span className={label}>Job address</span>
-            <input value={draft.job_address} onChange={(e) => set('job_address', e.target.value)} className={input} placeholder="Where the loads go" />
+          <label className="col-span-2 sm:col-span-3"><span className={label}>Load address (pit)</span>
+            <input value={draft.pit_address} onChange={(e) => set('pit_address', e.target.value)} className={input} placeholder="Where the trucks load" />
           </label>
-          <label className="col-span-2 sm:col-span-3"><span className={label}>Pit address</span>
-            <input value={draft.pit_address} onChange={(e) => set('pit_address', e.target.value)} className={input} placeholder="Where the material is loaded" />
+          <label className="col-span-2 sm:col-span-3"><span className={label}>Unload address (job)</span>
+            <input value={draft.job_address} onChange={(e) => set('job_address', e.target.value)} className={input} placeholder="Where the trucks dump" />
           </label>
           <label className="col-span-2 sm:col-span-3"><span className={label}>Material</span>
             <input value={draft.material} onChange={(e) => set('material', e.target.value)} className={input} placeholder="e.g. XOUT, A1A, road base" />

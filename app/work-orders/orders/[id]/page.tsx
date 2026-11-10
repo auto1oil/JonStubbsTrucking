@@ -115,8 +115,8 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
       ['Unit #', order.unit_number],
     ]],
     ['Where', [
-      ['Pit address (load here)', <AddressLink key="pit" address={order.pit_address} />],
-      ['Job address (deliver here)', <AddressLink key="job" address={order.job_address} />],
+      ['Load address (pit)', <AddressLink key="pit" address={order.pit_address} />],
+      ['Unload address (job)', <AddressLink key="job" address={order.job_address} />],
     ]],
     ['When', [
       ['Runs', orderSpan(order)],

@@ -10,8 +10,8 @@ export default function LoadDetails({ load, unit }: { load: HaulerLoad; unit?: H
     ['Phase', load.phase_code],
     ['Date', load.job_date],
     ['Start time', load.start_time],
-    ['Pickup (pit)', <AddressLink key="p" address={load.pickup} />],
-    ['Drop off (job)', <AddressLink key="d" address={load.dropoff} />],
+    ['Load address (pit)', <AddressLink key="p" address={load.pickup} />],
+    ['Unload address (job)', <AddressLink key="d" address={load.dropoff} />],
     ['Material', load.material],
     ['Truck', unit ? `Unit ${unit.unit_number || ''}`.trim() : load.equipment_type],
     ['Pays', load.rate != null ? `$${Number(load.rate).toFixed(2)} per ${load.rate_unit || 'hour'}` : null],
@@ -21,7 +21,7 @@ export default function LoadDetails({ load, unit }: { load: HaulerLoad; unit?: H
     <div className="mt-2">
       <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-sm">
         {shown.map(([k, v]) => (
-          <div key={k} className={k.startsWith('Pickup') || k.startsWith('Drop') ? 'col-span-2 sm:col-span-3' : ''}>
+          <div key={k} className={k.endsWith('address (pit)') || k.endsWith('address (job)') ? 'col-span-2 sm:col-span-3' : ''}>
             <dt className="text-[11px] text-gray-500">{k}</dt>
             <dd className="text-gray-900">{v}</dd>
           </div>

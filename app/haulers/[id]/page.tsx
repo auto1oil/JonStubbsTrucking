@@ -457,10 +457,10 @@ export default function HaulerDetailPage({ params }: { params: { id: string } })
               <label><span className={label}>Start time</span>
                 <input type="time" value={load.start_time} onChange={(e) => setLoad({ ...load, start_time: e.target.value })} className={input} />
               </label>
-              <label><span className={label}>Pickup</span>
+              <label><span className={label}>Load address (pit)</span>
                 <input value={load.pickup} onChange={(e) => setLoad({ ...load, pickup: e.target.value })} className={input} />
               </label>
-              <label><span className={label}>Drop off</span>
+              <label><span className={label}>Unload address (job)</span>
                 <input value={load.dropoff} onChange={(e) => setLoad({ ...load, dropoff: e.target.value })} className={input} />
               </label>
               <label><span className={label}>Material</span>
