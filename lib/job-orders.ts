@@ -40,6 +40,11 @@ export type JobOrder = {
   job_number: string | null;
   phase_code: string | null;
   job_address: string | null;
+  // Where the material is loaded, and what it is — the paper ticket's "Pit
+  // address" and "Material" lines, set once here and carried onto every
+  // load and ticket.
+  pit_address: string | null;
+  material: string | null;
   start_date: string | null;
   end_date: string | null;
   start_time: string | null;
@@ -69,7 +74,7 @@ export type JobOrder = {
 // database and never posted.
 export const ORDER_EDITABLE_FIELDS = [
   'business_id', 'customer_number', 'job_name', 'job_number', 'phase_code',
-  'job_address', 'start_date', 'end_date', 'start_time', 'stop_time',
+  'job_address', 'pit_address', 'material', 'start_date', 'end_date', 'start_time', 'stop_time',
   'travel_hours', 'down_hours', 'rate', 'pay_rate', 'rate_unit', 'fuel_surcharge',
   'fsr', 'tonnage', 'tonnage_type', 'equipment_type', 'unit_number', 'status', 'notes',
 ] as const;
@@ -130,6 +135,8 @@ export function ticketDefaultsFrom(o: JobOrder, forHauler = false): Record<strin
   put('job_number', o.job_number);
   put('job_name', o.job_name);
   put('job_address', o.job_address);
+  put('pit_address', o.pit_address);
+  put('material', o.material);
   put('phase_code', o.phase_code);
   put('fsr', o.fsr);
   // The ticket's rate is what its filer is owed. A hauler's crew is owed the

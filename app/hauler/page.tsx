@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
+import LoadDetails from '@/components/LoadDetails';
 import {
   LOAD_STATUS_LABEL, LOAD_STATUS_TONE,
   type HaulerLoad, type HaulerEquipment, type LoadStatus,
@@ -175,16 +176,9 @@ export default function HaulerLoadsPage() {
   const working = loads.filter((l) => ['accepted', 'assigned'].includes(l.status));
   const past = loads.filter((l) => ['completed', 'declined', 'cancelled'].includes(l.status));
 
+  // Everything dispatch put on the load, laid out to read before taking it.
   function details(l: HaulerLoad) {
-    const unit = fleet.find((u) => u.id === l.equipment_id);
-    return [
-      l.job_number && l.job_name ? l.job_name : null,
-      l.job_date,
-      l.start_time,
-      unit ? `Unit ${unit.unit_number || ''}`.trim() : l.equipment_type,
-      l.pickup && l.dropoff ? `${l.pickup} → ${l.dropoff}` : (l.pickup || l.dropoff),
-      l.rate != null ? `$${Number(l.rate).toFixed(2)}/${l.rate_unit || 'hr'}` : null,
-    ].filter(Boolean).join(' · ');
+    return <LoadDetails load={l} unit={fleet.find((u) => u.id === l.equipment_id) || null} />;
   }
 
   return (
@@ -246,8 +240,7 @@ export default function HaulerLoadsPage() {
                     <div className="font-medium text-sm">
                       {l.job_number ? `Job ${l.job_number}` : l.job_name || 'Load'}
                     </div>
-                    <div className="text-xs text-gray-600 mt-0.5">{details(l)}</div>
-                    {l.notes && <div className="text-xs text-gray-600 mt-1">{l.notes}</div>}
+                    {details(l)}
 
                     {declining === l.id ? (
                       <div className="mt-2">
@@ -323,7 +316,7 @@ export default function HaulerLoadsPage() {
                           <span className="font-medium text-sm">
                             {l.job_number ? `Job ${l.job_number}` : l.job_name || 'Load'}
                           </span>
-                          <div className="text-xs text-gray-500 mt-0.5">{details(l)}</div>
+                          {details(l)}
                           {l.decline_reason && (
                             <div className="text-xs text-gray-500 mt-0.5">You declined: {l.decline_reason}</div>
                           )}

@@ -34,7 +34,7 @@ export default function HaulerDetailPage({ params }: { params: { id: string } })
   const [batchNotes, setBatchNotes] = useState('');
   const [load, setLoad] = useState({
     job_number: '', job_name: '', phase_code: '', equipment_type: '',
-    job_date: today(), start_time: '', pickup: '', dropoff: '',
+    job_date: today(), start_time: '', pickup: '', dropoff: '', material: '',
     rate: '', rate_unit: 'hour', notes: '', equipment_id: '', order_id: '',
   });
 
@@ -100,6 +100,7 @@ export default function HaulerDetailPage({ params }: { params: { id: string } })
           start_time: load.start_time,
           pickup: load.pickup.trim(),
           dropoff: load.dropoff.trim(),
+          material: load.material.trim(),
           rate: load.rate,
           rate_unit: load.rate_unit,
           notes: load.notes.trim(),
@@ -110,7 +111,7 @@ export default function HaulerDetailPage({ params }: { params: { id: string } })
       if (!json.ok) { setError(json.error || 'Could not send the load.'); return; }
       setMsg('Load sent — the hauler has been notified.');
       setOffering(false);
-      setLoad({ ...load, job_number: '', job_name: '', pickup: '', dropoff: '', notes: '' });
+      setLoad({ ...load, job_number: '', job_name: '', pickup: '', dropoff: '', material: '', notes: '' });
       refresh();
     } catch {
       setError('Network error — try again.');
@@ -426,6 +427,9 @@ export default function HaulerDetailPage({ params }: { params: { id: string } })
                       job_name: picked?.job_name || load.job_name,
                       phase_code: picked?.phase_code || load.phase_code,
                       equipment_type: picked?.equipment_type || load.equipment_type,
+                      pickup: picked?.pit_address || load.pickup,
+                      dropoff: picked?.job_address || load.dropoff,
+                      material: picked?.material || load.material,
                       // The PAY rate — the load is what the hauler reads, and
                       // the customer rate must never ride along on it.
                       rate: picked?.pay_rate != null ? String(picked.pay_rate) : load.rate,
@@ -458,6 +462,9 @@ export default function HaulerDetailPage({ params }: { params: { id: string } })
               </label>
               <label><span className={label}>Drop off</span>
                 <input value={load.dropoff} onChange={(e) => setLoad({ ...load, dropoff: e.target.value })} className={input} />
+              </label>
+              <label><span className={label}>Material</span>
+                <input value={load.material} onChange={(e) => setLoad({ ...load, material: e.target.value })} className={input} placeholder="e.g. XOUT" />
               </label>
               <label><span className={label}>Equipment needed</span>
                 <input value={load.equipment_type} onChange={(e) => setLoad({ ...load, equipment_type: e.target.value })} className={input} />

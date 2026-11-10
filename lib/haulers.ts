@@ -107,6 +107,9 @@ export type HaulerLoad = {
   start_time: string | null;
   pickup: string | null;
   dropoff: string | null;
+  // What the load carries — off the order, shown to the hauler, and the
+  // ticket's default material.
+  material: string | null;
   rate: number | null;
   rate_unit: string | null;
   notes: string | null;
@@ -126,7 +129,7 @@ export const LOAD_EDITABLE_FIELDS = [
   'hauler_id', 'equipment_id', 'work_order_id', 'order_id', 'driver_id',
   'job_number', 'job_name',
   'phase_code', 'equipment_type', 'job_date', 'start_time', 'pickup',
-  'dropoff', 'rate', 'rate_unit', 'notes',
+  'dropoff', 'material', 'rate', 'rate_unit', 'notes',
 ] as const;
 
 const LOAD_NUMERIC_FIELDS = new Set(['rate']);

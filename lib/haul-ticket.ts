@@ -56,6 +56,7 @@ export async function startHaulTicket(
         // material is loaded at and the job it goes to.
         pit_address: load.pickup,
         job_address: load.dropoff || load.pickup,
+        material: load.material,
         phase_code: load.phase_code,
         job_date: load.job_date,
         // What the hauler is owed. Never the customer's rate — that lives on

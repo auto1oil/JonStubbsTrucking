@@ -3,9 +3,11 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-browser';
 import OrderForm from '@/components/OrderForm';
+import AddressLink from '@/components/AddressLink';
 import {
   ORDER_STATUS_LABEL, ORDER_STATUS_TONE, orderSpan, type JobOrder,
 } from '@/lib/job-orders';
+import { LOAD_STATUS_LABEL, LOAD_STATUS_TONE, type HaulerLoad, type LoadStatus } from '@/lib/haulers';
 import {
   STATUS_LABEL, STATUS_TONE, ticketAmount, totalHours,
   type WorkOrder, type WorkOrderStatus,
@@ -19,6 +21,10 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   const [order, setOrder] = useState<JobOrder | null>(null);
   const [tickets, setTickets] = useState<WorkOrder[]>([]);
   const [customer, setCustomer] = useState<string | null>(null);
+  // The trucks dispatched against this order, with who they went to.
+  const [loads, setLoads] = useState<HaulerLoad[]>([]);
+  const [haulerNames, setHaulerNames] = useState<Record<string, string>>({});
+  const [driverNames, setDriverNames] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -29,15 +35,27 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
     if (!o) { setError('That order no longer exists.'); return; }
     setOrder(o as JobOrder);
 
-    const [{ data: t }, { data: biz }] = await Promise.all([
+    const [{ data: t }, { data: biz }, { data: l }] = await Promise.all([
       supabase.from('work_orders').select('*').eq('order_id', params.id)
         .order('job_date', { ascending: false, nullsFirst: false }),
       (o as JobOrder).business_id
         ? supabase.from('businesses').select('name').eq('id', (o as JobOrder).business_id!).maybeSingle()
         : Promise.resolve({ data: null }),
+      supabase.from('hauler_loads').select('*').eq('order_id', params.id)
+        .order('job_date', { ascending: false, nullsFirst: false }),
     ]);
     setTickets((t as WorkOrder[]) || []);
     setCustomer((biz as { name: string } | null)?.name ?? null);
+    const rows = (l as HaulerLoad[]) || [];
+    setLoads(rows);
+    const haulerIds = Array.from(new Set(rows.map((r) => r.hauler_id)));
+    const driverIds = Array.from(new Set(rows.map((r) => r.driver_id).filter(Boolean))) as string[];
+    const [{ data: hs }, { data: ds }] = await Promise.all([
+      haulerIds.length ? supabase.from('haulers').select('id, name').in('id', haulerIds) : Promise.resolve({ data: [] }),
+      driverIds.length ? supabase.from('profiles').select('id, full_name, email').in('id', driverIds) : Promise.resolve({ data: [] }),
+    ]);
+    setHaulerNames(Object.fromEntries(((hs as { id: string; name: string }[]) || []).map((h) => [h.id, h.name])));
+    setDriverNames(Object.fromEntries(((ds as { id: string; full_name: string | null; email: string }[]) || []).map((d) => [d.id, d.full_name || d.email])));
   }, [supabase, params.id]);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -78,21 +96,41 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   const hours = tickets.reduce((n, t) => n + totalHours(t), 0);
   const tons = tickets.reduce((n, t) => n + Number(t.loads_tons || 0), 0);
 
-  const facts: [string, string | null][] = [
-    ['Customer', customer],
-    ['Customer #', order.customer_number],
-    ['Job #', order.job_number],
-    ['Phase', order.phase_code],
-    ['FSR', order.fsr],
-    ['Address', order.job_address],
-    ['Runs', orderSpan(order)],
-    ['Daily hours', order.start_time && order.stop_time ? `${order.start_time} – ${order.stop_time}` : null],
-    ['Rate', order.rate != null ? `$${Number(order.rate).toFixed(2)}/${order.rate_unit || 'hr'}` : null],
-    ['Travel', order.travel_hours != null ? `${Number(order.travel_hours).toFixed(2)} hrs` : null],
-    ['Down time', order.down_hours != null ? `${Number(order.down_hours).toFixed(2)} hrs` : null],
-    ['Tonnage', order.tonnage != null ? `${Number(order.tonnage).toFixed(2)} ${order.tonnage_type || ''}`.trim() : null],
-    ['Equipment', order.equipment_type],
-    ['Unit #', order.unit_number],
+  // Every field on the order, grouped the way the office reads it. Blank
+  // fields are left out so the card only says what was agreed.
+  const per = order.rate_unit || 'hour';
+  const money = (n: number | null) => (n != null ? `$${Number(n).toFixed(2)}` : null);
+  const hrs = (n: number | null) => (n != null ? `${Number(n).toFixed(2)} hrs` : null);
+  const groups: [string, [string, React.ReactNode][]][] = [
+    ['The job', [
+      ['Customer', customer],
+      ['Contractor / customer #', order.customer_number],
+      ['Job #', order.job_number],
+      ['Job name', order.job_name],
+      ['Phase', order.phase_code],
+      ['FSR', order.fsr],
+      ['Material', order.material],
+      ['Tonnage', order.tonnage != null ? `${Number(order.tonnage).toFixed(2)} ${order.tonnage_type || 'tons'}`.trim() : null],
+      ['Equipment', order.equipment_type],
+      ['Unit #', order.unit_number],
+    ]],
+    ['Where', [
+      ['Pit address (load here)', <AddressLink key="pit" address={order.pit_address} />],
+      ['Job address (deliver here)', <AddressLink key="job" address={order.job_address} />],
+    ]],
+    ['When', [
+      ['Runs', orderSpan(order)],
+      ['Daily start', order.start_time],
+      ['Daily stop', order.stop_time],
+      ['Travel allowed', hrs(order.travel_hours)],
+      ['Down time allowed', hrs(order.down_hours)],
+    ]],
+    ['Money', [
+      ['Customer rate', money(order.rate) ? `${money(order.rate)} per ${per}` : null],
+      ['Hauler pay rate', money(order.pay_rate) ? `${money(order.pay_rate)} per ${per}` : null],
+      ['Margin', order.rate != null && order.pay_rate != null ? `${money(Number(order.rate) - Number(order.pay_rate))} per ${per}` : null],
+      ['Fuel surcharge', money(order.fuel_surcharge)],
+    ]],
   ];
 
   return (
@@ -123,15 +161,73 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
 
       <div className={card}>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-3">Agreed</h2>
-        <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 text-sm">
-          {facts.filter(([, v]) => v).map(([k, v]) => (
-            <div key={k}>
-              <dt className="text-xs text-gray-500">{k}</dt>
-              <dd>{v}</dd>
-            </div>
-          ))}
-        </dl>
-        {order.notes && <p className="text-sm text-gray-600 mt-3 whitespace-pre-wrap">{order.notes}</p>}
+        <div className="space-y-4">
+          {groups.map(([title, rows]) => {
+            const shown = rows.filter(([, v]) => v !== null && v !== undefined && v !== '');
+            if (shown.length === 0) return null;
+            return (
+              <div key={title}>
+                <h3 className="text-xs font-semibold text-gray-700 mb-1.5">{title}</h3>
+                <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 text-sm">
+                  {shown.map(([k, v]) => (
+                    <div key={k} className={title === 'Where' ? 'col-span-2 sm:col-span-3' : ''}>
+                      <dt className="text-xs text-gray-500">{k}</dt>
+                      <dd>{v}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            );
+          })}
+          <div>
+            <h3 className="text-xs font-semibold text-gray-700 mb-1.5">Job notes</h3>
+            {order.notes ? (
+              <p className="text-sm text-gray-800 whitespace-pre-wrap rounded-md bg-amber-50 border border-amber-200 px-3 py-2">{order.notes}</p>
+            ) : (
+              <p className="text-sm text-gray-400">None — add them with Edit.</p>
+            )}
+          </div>
+          <p className="text-[11px] text-gray-400">
+            Order #{order.order_number} · created {new Date(order.created_at).toLocaleDateString()}
+            {order.updated_at !== order.created_at ? ` · updated ${new Date(order.updated_at).toLocaleString()}` : ''}
+          </p>
+        </div>
+      </div>
+
+      <div className={card}>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-3">
+          Trucks sent on this order
+        </h2>
+        {loads.length === 0 ? (
+          <p className="text-sm text-gray-500">
+            No loads dispatched yet. Use the Send pill on the Orders list to send trucks to a hauler.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {loads.map((l) => (
+              <div key={l.id} className="border border-gray-200 rounded-md px-3 py-2 flex justify-between items-start gap-3 flex-wrap">
+                <div className="min-w-0 text-sm">
+                  <div className="font-medium">
+                    {haulerNames[l.hauler_id] || 'Hauler'}
+                    {l.driver_id ? ` · ${driverNames[l.driver_id] || 'driver'}` : ''}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    {[l.job_date, l.start_time, l.equipment_type, l.material].filter(Boolean).join(' · ')}
+                  </div>
+                  {l.decline_reason && <div className="text-xs text-red-700 mt-0.5">Declined: {l.decline_reason}</div>}
+                  {l.work_order_id && (
+                    <Link href={`/work-orders/${l.work_order_id}`} className="inline-block text-xs text-brand-700 hover:underline mt-1">
+                      Open the haul ticket →
+                    </Link>
+                  )}
+                </div>
+                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${LOAD_STATUS_TONE[l.status as LoadStatus]}`}>
+                  {LOAD_STATUS_LABEL[l.status as LoadStatus]}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className={card}>

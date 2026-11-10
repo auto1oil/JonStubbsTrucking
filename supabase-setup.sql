@@ -3132,5 +3132,18 @@ notify pgrst, 'reload schema';
 
 
 -- ==========================================================================
+-- 52. What an order hauls, and from where
+-- ==========================================================================
+-- The paper ticket asks for the material and the pit; the order it comes
+-- from should say both so a dispatched load, and the ticket that follows,
+-- start with them filled in.
+alter table public.job_orders   add column if not exists material    text;
+alter table public.job_orders   add column if not exists pit_address text;
+alter table public.hauler_loads add column if not exists material    text;
+
+notify pgrst, 'reload schema';
+
+
+-- ==========================================================================
 -- DONE
 -- ==========================================================================

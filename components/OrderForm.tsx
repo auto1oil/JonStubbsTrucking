@@ -30,6 +30,8 @@ function toDraft(o: JobOrder | null): Draft {
     job_number: v(o?.job_number),
     phase_code: v(o?.phase_code),
     job_address: v(o?.job_address),
+    pit_address: v(o?.pit_address),
+    material: v(o?.material),
     start_date: v(o?.start_date) || today,
     end_date: v(o?.end_date) || today,
     start_time: v(o?.start_time),
@@ -81,6 +83,8 @@ export default function OrderForm({ order }: { order: JobOrder | null }) {
       job_number: txt(draft.job_number),
       phase_code: txt(draft.phase_code),
       job_address: txt(draft.job_address),
+      pit_address: txt(draft.pit_address),
+      material: txt(draft.material),
       start_date: draft.start_date || null,
       end_date: draft.end_date || null,
       start_time: txt(draft.start_time),
@@ -142,7 +146,13 @@ export default function OrderForm({ order }: { order: JobOrder | null }) {
             <input value={draft.phase_code} onChange={(e) => set('phase_code', e.target.value)} className={input} />
           </label>
           <label className="col-span-2 sm:col-span-3"><span className={label}>Job address</span>
-            <input value={draft.job_address} onChange={(e) => set('job_address', e.target.value)} className={input} />
+            <input value={draft.job_address} onChange={(e) => set('job_address', e.target.value)} className={input} placeholder="Where the loads go" />
+          </label>
+          <label className="col-span-2 sm:col-span-3"><span className={label}>Pit address</span>
+            <input value={draft.pit_address} onChange={(e) => set('pit_address', e.target.value)} className={input} placeholder="Where the material is loaded" />
+          </label>
+          <label className="col-span-2 sm:col-span-3"><span className={label}>Material</span>
+            <input value={draft.material} onChange={(e) => set('material', e.target.value)} className={input} placeholder="e.g. XOUT, A1A, road base" />
           </label>
         </div>
       </div>
