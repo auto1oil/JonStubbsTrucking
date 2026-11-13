@@ -1,7 +1,13 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase-browser';
+import { mapsUrl } from '@/lib/maps';
+import { DEFAULT_RADIUS_M } from '@/lib/location-check';
+
+// Leaflet touches `window`, so the map only loads in the browser.
+const SitePinPicker = dynamic(() => import('./SitePinPicker'), { ssr: false });
 import CustomerPicker from '@/components/CustomerPicker';
 import { ORDER_STATUSES, ORDER_STATUS_LABEL, type JobOrder } from '@/lib/job-orders';
 
@@ -32,6 +38,11 @@ function toDraft(o: JobOrder | null): Draft {
     job_address: v(o?.job_address),
     pit_address: v(o?.pit_address),
     material: v(o?.material),
+    pit_lat: v(o?.pit_lat),
+    pit_lng: v(o?.pit_lng),
+    job_lat: v(o?.job_lat),
+    job_lng: v(o?.job_lng),
+    geo_radius_m: v(o?.geo_radius_m) || String(DEFAULT_RADIUS_M),
     start_date: v(o?.start_date) || today,
     end_date: v(o?.end_date) || today,
     start_time: v(o?.start_time),
@@ -63,6 +74,31 @@ export default function OrderForm({ order }: { order: JobOrder | null }) {
   const id = order?.id ?? null;
   const set = (k: string, v: string) => setDraft((d) => ({ ...d, [k]: v }));
 
+  // The pins behind the place check. An address is looked up when the
+  // office leaves the box (only if that end isn't pinned yet, so a pin they
+  // dragged into place is never overwritten), or on demand; a pit with no
+  // street address gets its pin dropped on the map.
+  const [showMap, setShowMap] = useState<{ pit: boolean; job: boolean }>({ pit: false, job: false });
+  const [geocoding, setGeocoding] = useState<'' | 'pit' | 'job'>('');
+  const [geoMsg, setGeoMsg] = useState<{ pit: string; job: string }>({ pit: '', job: '' });
+
+  async function locate(which: 'pit' | 'job', force: boolean) {
+    const addr = (which === 'pit' ? draft.pit_address : draft.job_address).trim();
+    const pinned = draft[`${which}_lat`] !== '' && draft[`${which}_lng`] !== '';
+    if (!addr || (pinned && !force)) return;
+    setGeocoding(which); setGeoMsg((m) => ({ ...m, [which]: '' }));
+    try {
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(addr)}`, { cache: 'no-store' });
+      const json = await res.json();
+      if (!json.ok) { setGeoMsg((m) => ({ ...m, [which]: json.error || 'Could not find that address.' })); return; }
+      setDraft((d) => ({ ...d, [`${which}_lat`]: String(json.lat), [`${which}_lng`]: String(json.lng) }));
+    } catch {
+      setGeoMsg((m) => ({ ...m, [which]: 'Could not reach the map service.' }));
+    } finally {
+      setGeocoding('');
+    }
+  }
+
   async function save() {
     if (!draft.job_name.trim() && !draft.job_number.trim()) {
       setError('Give the order a job name or a job number so it can be told apart.');
@@ -85,6 +121,11 @@ export default function OrderForm({ order }: { order: JobOrder | null }) {
       job_address: txt(draft.job_address),
       pit_address: txt(draft.pit_address),
       material: txt(draft.material),
+      pit_lat: num(draft.pit_lat),
+      pit_lng: num(draft.pit_lng),
+      job_lat: num(draft.job_lat),
+      job_lng: num(draft.job_lng),
+      geo_radius_m: Math.max(50, Math.round(num(draft.geo_radius_m) ?? DEFAULT_RADIUS_M)),
       start_date: draft.start_date || null,
       end_date: draft.end_date || null,
       start_time: txt(draft.start_time),
@@ -125,6 +166,61 @@ export default function OrderForm({ order }: { order: JobOrder | null }) {
   const label = 'block text-xs font-medium text-gray-600 mb-1';
   const card = 'bg-white border border-gray-200 rounded-lg p-4';
 
+  // One address box with its pin: status line, look-up, map, clear.
+  function pinBlock(which: 'pit' | 'job') {
+    const addrKey = which === 'pit' ? 'pit_address' : 'job_address';
+    const latKey = `${which}_lat`; const lngKey = `${which}_lng`;
+    const lat = draft[latKey] !== '' ? Number(draft[latKey]) : null;
+    const lng = draft[lngKey] !== '' ? Number(draft[lngKey]) : null;
+    const pinned = lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
+    return (
+      <div className="col-span-2 sm:col-span-3">
+        <label><span className={label}>{which === 'pit' ? 'Load address (pit)' : 'Unload address (job)'}</span>
+          <input
+            value={draft[addrKey]}
+            onChange={(e) => set(addrKey, e.target.value)}
+            onBlur={() => locate(which, false)}
+            className={input}
+            placeholder={which === 'pit' ? 'Where the trucks load' : 'Where the trucks dump'}
+          />
+        </label>
+        <div className="mt-1 flex items-center gap-3 flex-wrap text-[11px]">
+          {pinned ? (
+            <span className="text-emerald-700">
+              Pinned ✓ {lat!.toFixed(5)}, {lng!.toFixed(5)} ·{' '}
+              <a href={mapsUrl(`${lat},${lng}`)} target="_blank" rel="noopener noreferrer" className="underline">open map</a>
+            </span>
+          ) : (
+            <span className="text-amber-700">Not pinned — GPS stamps can&apos;t be checked against this end.</span>
+          )}
+          <button type="button" onClick={() => locate(which, true)} disabled={geocoding === which || !draft[addrKey].trim()}
+            className="text-brand-700 hover:underline disabled:opacity-50">
+            {geocoding === which ? 'Finding…' : 'Find from address'}
+          </button>
+          <button type="button" onClick={() => setShowMap((m) => ({ ...m, [which]: !m[which] }))} className="text-brand-700 hover:underline">
+            {showMap[which] ? 'Hide map' : (pinned ? 'Adjust on map' : 'Drop pin on map')}
+          </button>
+          {pinned && (
+            <button type="button" onClick={() => setDraft((d) => ({ ...d, [latKey]: '', [lngKey]: '' }))} className="text-gray-500 hover:underline">
+              Clear pin
+            </button>
+          )}
+        </div>
+        {geoMsg[which] && <p className="text-[11px] text-red-600 mt-0.5">{geoMsg[which]}</p>}
+        {showMap[which] && (
+          <div className="mt-2">
+            <SitePinPicker
+              lat={pinned ? lat : null}
+              lng={pinned ? lng : null}
+              radius={Number(draft.geo_radius_m) || DEFAULT_RADIUS_M}
+              onPick={(la, lo) => setDraft((d) => ({ ...d, [latKey]: la.toFixed(6), [lngKey]: lo.toFixed(6) }))}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className={card}>
@@ -145,11 +241,14 @@ export default function OrderForm({ order }: { order: JobOrder | null }) {
           <label><span className={label}>Phase code</span>
             <input value={draft.phase_code} onChange={(e) => set('phase_code', e.target.value)} className={input} />
           </label>
-          <label className="col-span-2 sm:col-span-3"><span className={label}>Load address (pit)</span>
-            <input value={draft.pit_address} onChange={(e) => set('pit_address', e.target.value)} className={input} placeholder="Where the trucks load" />
-          </label>
-          <label className="col-span-2 sm:col-span-3"><span className={label}>Unload address (job)</span>
-            <input value={draft.job_address} onChange={(e) => set('job_address', e.target.value)} className={input} placeholder="Where the trucks dump" />
+          {pinBlock('pit')}
+          {pinBlock('job')}
+          <label><span className={label}>Match radius (meters)</span>
+            <input type="number" min="50" step="50" inputMode="numeric" value={draft.geo_radius_m}
+              onChange={(e) => set('geo_radius_m', e.target.value)} className={input} />
+            <span className="block mt-1 text-[11px] text-gray-500">
+              A stamp counts as on-site within this distance of the pin. 800 m (about half a mile) suits a pit or a big job; tighten it for a street address.
+            </span>
           </label>
           <label className="col-span-2 sm:col-span-3"><span className={label}>Material</span>
             <input value={draft.material} onChange={(e) => set('material', e.target.value)} className={input} placeholder="e.g. XOUT, A1A, road base" />

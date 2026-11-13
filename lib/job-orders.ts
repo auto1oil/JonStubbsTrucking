@@ -45,6 +45,14 @@ export type JobOrder = {
   // load and ticket.
   pit_address: string | null;
   material: string | null;
+  // The pins the place check measures GPS stamps against, and the radius
+  // a stamp has to land within. Geocoded from the addresses or dropped on
+  // the map by the office; null means that end can't be checked.
+  pit_lat: number | null;
+  pit_lng: number | null;
+  job_lat: number | null;
+  job_lng: number | null;
+  geo_radius_m: number | null;
   start_date: string | null;
   end_date: string | null;
   start_time: string | null;
@@ -74,13 +82,15 @@ export type JobOrder = {
 // database and never posted.
 export const ORDER_EDITABLE_FIELDS = [
   'business_id', 'customer_number', 'job_name', 'job_number', 'phase_code',
-  'job_address', 'pit_address', 'material', 'start_date', 'end_date', 'start_time', 'stop_time',
+  'job_address', 'pit_address', 'material', 'pit_lat', 'pit_lng', 'job_lat', 'job_lng', 'geo_radius_m',
+  'start_date', 'end_date', 'start_time', 'stop_time',
   'travel_hours', 'down_hours', 'rate', 'pay_rate', 'rate_unit', 'fuel_surcharge',
   'fsr', 'tonnage', 'tonnage_type', 'equipment_type', 'unit_number', 'status', 'notes',
 ] as const;
 
 const ORDER_NUMERIC_FIELDS = new Set([
   'travel_hours', 'down_hours', 'rate', 'pay_rate', 'fuel_surcharge', 'tonnage',
+  'pit_lat', 'pit_lng', 'job_lat', 'job_lng', 'geo_radius_m',
 ]);
 
 export function pickOrderEditable(body: Record<string, unknown>): Record<string, unknown> {

@@ -2,8 +2,10 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
-import { STATUS_LABEL, STATUS_TONE, type WorkOrder, type WorkOrderStatus } from '@/lib/work-orders';
+import { STATUS_LABEL, STATUS_TONE, type WorkOrder, type WorkOrderStatus, type WorkOrderLoad } from '@/lib/work-orders';
 import WorkOrderForm from '@/components/WorkOrderForm';
+import LocationCheck from '@/components/LocationCheck';
+import type { OrderPins } from '@/lib/location-check';
 
 // The office's view of one ticket: the same form the crew filled in, fully
 // editable, with Approve / Send back at the bottom and the approval trail on
@@ -19,6 +21,9 @@ export default function OfficeWorkOrderPage({ params }: { params: { id: string }
   const [invoiceMsg, setInvoiceMsg] = useState('');
   const [factorBusy, setFactorBusy] = useState(false);
   const [factorMsg, setFactorMsg] = useState('');
+  // The place check: the order's pins and this ticket's GPS stamps.
+  const [pins, setPins] = useState<OrderPins | null>(null);
+  const [loads, setLoads] = useState<WorkOrderLoad[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -42,6 +47,22 @@ export default function OfficeWorkOrderPage({ params }: { params: { id: string }
       const supabase = createClient();
       const { data } = await supabase.from('profiles').select('id, full_name, email').in('id', ids);
       setPeople(Object.fromEntries(((data as Person[]) || []).map((p) => [p.id, p])));
+    })();
+  }, [wo]);
+
+  // Pins and stamps, re-read whenever the ticket does.
+  useEffect(() => {
+    if (!wo) return;
+    (async () => {
+      const supabase = createClient();
+      const [{ data: lines }, { data: o }] = await Promise.all([
+        supabase.from('work_order_loads').select('*').eq('work_order_id', wo.id).order('load_no'),
+        wo.order_id
+          ? supabase.from('job_orders').select('pit_lat, pit_lng, job_lat, job_lng, geo_radius_m').eq('id', wo.order_id).maybeSingle()
+          : Promise.resolve({ data: null }),
+      ]);
+      setLoads((lines as WorkOrderLoad[]) || []);
+      setPins((o as OrderPins | null) ?? null);
     })();
   }, [wo]);
 
@@ -176,6 +197,18 @@ export default function OfficeWorkOrderPage({ params }: { params: { id: string }
           </p>
         )
       )}
+
+      {/* The place check: every GPS stamp against the order's pit and job.
+          A ticket with no order says so; the office pins the order to fix it. */}
+      <div className="mb-3">
+        {wo.order_id ? (
+          <LocationCheck pins={pins} loads={loads} />
+        ) : (
+          <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-3 py-2">
+            Location check — this ticket isn&apos;t on an order, so there is no pit or job to measure its stamps against.
+          </p>
+        )}
+      </div>
 
       <WorkOrderForm workOrder={wo} canApprove onSaved={setWo} />
     </div>

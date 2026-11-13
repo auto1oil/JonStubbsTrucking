@@ -117,6 +117,14 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
     ['Where', [
       ['Load address (pit)', <AddressLink key="pit" address={order.pit_address} />],
       ['Unload address (job)', <AddressLink key="job" address={order.job_address} />],
+      ['Location check', (() => {
+        const pit = order.pit_lat != null && order.pit_lng != null;
+        const job = order.job_lat != null && order.job_lng != null;
+        const r = order.geo_radius_m || 800;
+        if (pit && job) return `On — every stamp must land within ${r} m of the pit or the job pin.`;
+        if (pit || job) return `Partly on — only the ${pit ? 'pit' : 'job'} is pinned. Pin the other end with Edit so every stamp is checked.`;
+        return 'Off — neither end is pinned. Edit the order and pin the pit and the job, or tickets on it will be flagged in the audit.';
+      })()],
     ]],
     ['When', [
       ['Runs', orderSpan(order)],

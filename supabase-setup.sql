@@ -3145,5 +3145,21 @@ notify pgrst, 'reload schema';
 
 
 -- ==========================================================================
+-- 53. Where the order's pit and job actually are
+-- ==========================================================================
+-- A pin for each end of the run, geocoded from the address or dropped on
+-- the map by the office, and how close a GPS stamp has to land to count as
+-- there. Load In/Out stamps are measured against the pit, Unload In/Out
+-- against the job; the ticket page and the audit queue show the result.
+alter table public.job_orders add column if not exists pit_lat      numeric(9,6);
+alter table public.job_orders add column if not exists pit_lng      numeric(9,6);
+alter table public.job_orders add column if not exists job_lat      numeric(9,6);
+alter table public.job_orders add column if not exists job_lng      numeric(9,6);
+alter table public.job_orders add column if not exists geo_radius_m integer not null default 800;
+
+notify pgrst, 'reload schema';
+
+
+-- ==========================================================================
 -- DONE
 -- ==========================================================================

@@ -187,6 +187,19 @@ the screens are a convenience, not the boundary.
 - **Admin-only screens** — everything under `/admin` (Time Clock, Users,
   Deliveries, Customers, PO #, Dashboard) redirects any other role away.
 
+### The place check
+
+Every GPS stamp on a ticket is measured against the order it was filed on:
+Load In / Load Out against the order's **pit pin**, Unload In / Unload Out
+against its **job pin**, within the order's match radius (800 m by default).
+The pins come from the Load and Unload addresses on the order form, looked
+up automatically or dropped on the map when an address like "Harmony PH2"
+won't look up. The office ticket page shows every stamp with its distance
+and a map link; the audit queue flags any ticket with an off-site stamp, a
+stamp with no fix, or an order that hasn't been pinned, so nothing passes
+on its own unless the location matched the job. Logic in
+`lib/location-check.ts`, rendered by `components/LocationCheck.tsx`.
+
 ### 7 — Connect to Auto 1 Funding
 
 This app identifies itself to the funding hub as source `jonstubbs` (the `FACTORING_SOURCE` constant in `lib/factoring.ts`; it must match the name the funding app tied the key to)

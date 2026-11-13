@@ -4,14 +4,18 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase-browser';
 import {
   totalHours, ticketAmount, onSiteHours, billableUnit, billableQuantity,
-  type WorkOrder,
+  type WorkOrder, type WorkOrderLoad,
 } from '@/lib/work-orders';
 import type { JobOrder } from '@/lib/job-orders';
+import { checkTicketLocations, type LocationReport } from '@/lib/location-check';
+import LocationCheck from '@/components/LocationCheck';
 
-// What the verify panel reads off the ticket's order.
+// What the verify panel reads off the ticket's order: the terms, and the
+// pins the place check measures the GPS stamps against.
 type OrderFacts = Pick<JobOrder,
   'id' | 'business_id' | 'job_number' | 'phase_code'
-  | 'rate' | 'pay_rate' | 'rate_unit' | 'fuel_surcharge'>;
+  | 'rate' | 'pay_rate' | 'rate_unit' | 'fuel_surcharge'
+  | 'pit_lat' | 'pit_lng' | 'job_lat' | 'job_lng' | 'geo_radius_m'>;
 
 // The audit queue.
 //
@@ -63,7 +67,10 @@ const DEFAULT_KEYS = ['job_date', 'driver_name', 'trucking_company', 'unit_numbe
   'loads_count', 'loads_tons', 'total_hours', 'amount'];
 
 // Why a ticket can't be passed without someone looking. Null means it can.
-function needsEyes(w: WorkOrder): string | null {
+// The place check is part of it: a stamp away from the pit or the job, a
+// stamp with no fix, or an order nobody pinned yet all stop the ticket from
+// passing on its own — the location has to match the job.
+function needsEyes(w: WorkOrder, loc?: LocationReport | null): string | null {
   if (w.order_mismatch && !w.mismatch_cleared_at) return w.order_mismatch;
   if (!w.order_id) return 'no order — nothing to check it against';
   if (!w.ticket_photo_path) return 'no photo of the paper ticket';
@@ -71,6 +78,12 @@ function needsEyes(w: WorkOrder): string | null {
   // nobody on the customer's side who agreed to these hours.
   if (!w.foreman_signature_path) return 'the job foreman never signed it';
   if (ticketAmount(w) <= 0) return 'nothing to bill — no hours, no tonnage, or no rate';
+  if (loc && loc.stamps.length > 0) {
+    if (!loc.checkable) return 'the order has no pins for the pit or the job — pin them on the order so the stamps can be checked';
+    if (loc.off > 0) return `${loc.off} GPS stamp${loc.off === 1 ? '' : 's'} off-site — not at the pit or the job`;
+    if (loc.nofix > 0) return `${loc.nofix} GPS stamp${loc.nofix === 1 ? '' : 's'} with no fix — location can't be confirmed`;
+    if (loc.unpinned > 0) return 'one end of the run isn\'t pinned on the order — some stamps can\'t be checked';
+  }
   return null;
 }
 
@@ -89,6 +102,8 @@ export default function AuditQueue() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [orderFacts, setOrderFacts] = useState<Record<string, OrderFacts>>({});
   const [bizNames, setBizNames] = useState<Record<string, string>>({});
+  // Every listed ticket's load lines, for the place check.
+  const [loadsByTicket, setLoadsByTicket] = useState<Record<string, WorkOrderLoad[]>>({});
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -99,6 +114,18 @@ export default function AuditQueue() {
     ]);
     const list = (tickets as WorkOrder[]) || [];
     setRows(list);
+
+    // The GPS stamps behind every ticket in the queue, one query.
+    if (list.length > 0) {
+      const { data: lines } = await supabase
+        .from('work_order_loads').select('*')
+        .in('work_order_id', list.map((w) => w.id));
+      const grouped: Record<string, WorkOrderLoad[]> = {};
+      for (const l of (lines as WorkOrderLoad[]) || []) (grouped[l.work_order_id] ||= []).push(l);
+      setLoadsByTicket(grouped);
+    } else {
+      setLoadsByTicket({});
+    }
     const saved = (setting as { value: string } | null)?.value;
     if (saved) setKeys(saved.split(',').map((k) => k.trim()).filter(Boolean));
 
@@ -108,7 +135,7 @@ export default function AuditQueue() {
     if (orderIds.length > 0) {
       const { data: ords } = await supabase
         .from('job_orders')
-        .select('id, business_id, job_number, phase_code, rate, pay_rate, rate_unit, fuel_surcharge')
+        .select('id, business_id, job_number, phase_code, rate, pay_rate, rate_unit, fuel_surcharge, pit_lat, pit_lng, job_lat, job_lng, geo_radius_m')
         .in('id', orderIds);
       const byId: Record<string, OrderFacts> = {};
       for (const o of (ords as OrderFacts[]) || []) byId[o.id] = o;
@@ -125,6 +152,16 @@ export default function AuditQueue() {
   }, [supabase]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // The place check per ticket, from its order's pins and its stamps.
+  const locOf = (w: WorkOrder): LocationReport | null => {
+    if (!w.order_id) return null;
+    const o = orderFacts[w.order_id];
+    return checkTicketLocations(o ? {
+      pit_lat: o.pit_lat, pit_lng: o.pit_lng, job_lat: o.job_lat, job_lng: o.job_lng, geo_radius_m: o.geo_radius_m,
+    } : null, loadsByTicket[w.id] || []);
+  };
+  const eyes = (w: WorkOrder) => needsEyes(w, locOf(w));
 
   // A fresh photo link each time a ticket is expanded — minted on demand so
   // it can't sit open long enough to expire.
@@ -222,7 +259,8 @@ export default function AuditQueue() {
         : (w.hauler_id && w.rate != null ? `$${Number(w.rate).toFixed(2)}/${per}` : '—')],
       ['Fuel surcharge', o?.fuel_surcharge != null ? `$${Number(o.fuel_surcharge).toFixed(2)}` : '—'],
     ];
-    const reason = needsEyes(w);
+    const reason = eyes(w);
+    const loc = locOf(w);
     return (
       <div className="rounded-md border border-gray-200 bg-gray-50 p-3 mt-2">
         {reason && <p className="text-xs text-red-700 font-medium mb-2">{reason}</p>}
@@ -278,6 +316,15 @@ export default function AuditQueue() {
                   </span>
                 )}
               </div>
+              {loc && (
+                <div className="mt-2">
+                  <LocationCheck
+                    pins={o ? { pit_lat: o.pit_lat, pit_lng: o.pit_lng, job_lat: o.job_lat, job_lng: o.job_lng, geo_radius_m: o.geo_radius_m } : null}
+                    loads={loadsByTicket[w.id] || []}
+                    compact
+                  />
+                </div>
+              )}
               {photoUrl ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img src={photoUrl} alt="Paper ticket" className="mt-2 max-h-64 w-auto rounded border border-gray-200" />
@@ -294,8 +341,8 @@ export default function AuditQueue() {
   }
 
   const shown = COLUMNS.filter((c) => keys.includes(c.key));
-  const flagged = rows.filter((w) => needsEyes(w) !== null);
-  const clean = rows.filter((w) => needsEyes(w) === null);
+  const flagged = rows.filter((w) => eyes(w) !== null);
+  const clean = rows.filter((w) => eyes(w) === null);
   const cleanTotal = clean.reduce((n, w) => n + ticketAmount(w), 0);
   const selectedTotal = clean
     .filter((w) => selected.has(w.id))
@@ -393,7 +440,7 @@ export default function AuditQueue() {
                     </span>
                     <span className="text-sm font-semibold shrink-0">${ticketAmount(w).toFixed(2)}</span>
                   </div>
-                  <p className="text-xs text-red-700 font-medium mt-1">{needsEyes(w)}</p>
+                  <p className="text-xs text-red-700 font-medium mt-1">{eyes(w)}</p>
                   <div className="text-xs text-gray-600 mt-1">
                     {shown.map((c) => `${c.label} ${c.get(w) || '—'}`).join(' · ')}
                   </div>
