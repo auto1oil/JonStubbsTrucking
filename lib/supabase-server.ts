@@ -1,8 +1,10 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { authCookieLifetime, KEEP_COOKIE } from '@/lib/keep-signed-in';
 
 export function createClient() {
   const cookieStore = cookies();
+  const keep = cookieStore.get(KEEP_COOKIE)?.value === '1';
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -11,10 +13,10 @@ export function createClient() {
         getAll() { return cookieStore.getAll(); },
         setAll(cookiesToSet) {
           try {
-            // Session-only auth cookies: stripping the lifetime makes them
-            // die with the browser, so every fresh open signs in again.
+            // Session-only auth cookies unless this phone opted to stay
+            // signed in (see lib/keep-signed-in.ts).
             cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, { ...options, maxAge: undefined, expires: undefined })
+              cookieStore.set(name, value, { ...options, ...authCookieLifetime(keep) })
             );
           } catch { /* server component, ignore */ }
         },

@@ -3161,5 +3161,31 @@ notify pgrst, 'reload schema';
 
 
 -- ==========================================================================
+-- 54. Tickets number themselves
+-- ==========================================================================
+-- A ticket saved without a number gets the next one (JST-001000, …), so
+-- nobody types one on a phone. A pre-printed number off the paper pad can
+-- still be typed in and wins.
+create sequence if not exists public.work_orders_ticket_seq start 1000;
+
+create or replace function public.assign_ticket_number()
+returns trigger language plpgsql as $$
+begin
+  if new.ticket_number is null or btrim(new.ticket_number) = '' then
+    new.ticket_number := 'JST-' || lpad(nextval('public.work_orders_ticket_seq')::text, 6, '0');
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_assign_ticket_number on public.work_orders;
+create trigger trg_assign_ticket_number
+  before insert on public.work_orders
+  for each row execute function public.assign_ticket_number();
+
+notify pgrst, 'reload schema';
+
+
+-- ==========================================================================
 -- DONE
 -- ==========================================================================

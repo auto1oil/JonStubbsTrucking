@@ -155,6 +155,9 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
             {ORDER_STATUS_LABEL[order.status]}
           </span>
           <button onClick={() => setEditing(true)} className="text-sm text-brand-700 hover:underline">Edit</button>
+          <Link href={`/work-orders/orders/new?from=${order.id}`} className="text-sm text-brand-700 hover:underline" title="Start a new order filled in from this one">
+            Copy
+          </Link>
         </div>
       </div>
 

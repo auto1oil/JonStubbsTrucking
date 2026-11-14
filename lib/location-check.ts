@@ -78,6 +78,19 @@ function pinFor(pins: OrderPins | null, which: Expected): { lat: number; lng: nu
   return lat != null && lng != null ? { lat: Number(lat), lng: Number(lng) } : null;
 }
 
+// One stamp on its own — what the driver's button shows the moment they tap.
+export function stampVerdict(
+  pins: OrderPins | null, key: LoadStampKey, lat: number | null, lng: number | null,
+): { status: StampStatus; distance_m: number | null; expected: Expected } {
+  const expected = EXPECTED_FOR[key];
+  const pin = pinFor(pins, expected);
+  if (!pin) return { status: 'unpinned', distance_m: null, expected };
+  if (lat == null || lng == null) return { status: 'nofix', distance_m: null, expected };
+  const radius = Number(pins?.geo_radius_m) > 0 ? Number(pins!.geo_radius_m) : DEFAULT_RADIUS_M;
+  const d = distanceM(lat, lng, pin.lat, pin.lng);
+  return { status: d <= radius ? 'ok' : 'off', distance_m: d, expected };
+}
+
 export function checkTicketLocations(pins: OrderPins | null, loads: WorkOrderLoad[]): LocationReport {
   const radius = Number(pins?.geo_radius_m) > 0 ? Number(pins!.geo_radius_m) : DEFAULT_RADIUS_M;
   const stamps: StampCheck[] = [];

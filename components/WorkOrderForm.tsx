@@ -119,7 +119,7 @@ function TimeWheel({
     onChange(`${nd || defaultDate}T${String(h).padStart(2, '0')}:${nm || '00'}`);
   }
 
-  const sel = 'px-1.5 py-1.5 border border-gray-300 rounded-md text-sm bg-white disabled:bg-gray-100';
+  const sel = 'px-2 py-2.5 min-h-[44px] border border-gray-300 rounded-md text-base bg-white disabled:bg-gray-100';
   // An exact minute from a stamp or an older ticket stays selectable even if
   // it isn't on the 5-minute wheel.
   const minutes = minute && !WHEEL_MINUTES.includes(minute)
@@ -497,6 +497,23 @@ export default function WorkOrderForm({
     }
   }
 
+  async function discardDraft() {
+    if (!id) return;
+    if (!window.confirm('Throw this draft away? Anything on it is lost.')) return;
+    setBusy('discard'); setError('');
+    try {
+      const res = await fetch(`/api/work-orders/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!json.ok) { setError(json.error || 'Could not discard the draft.'); return; }
+      router.push('/tickets');
+      router.refresh();
+    } catch {
+      setError('Network error — try again.');
+    } finally {
+      setBusy('');
+    }
+  }
+
   async function approve(reject: boolean) {
     if (!id) return;
     const reason = reject ? window.prompt('What needs fixing?')?.trim() : '';
@@ -617,7 +634,8 @@ export default function WorkOrderForm({
             <input value={draft.phase_code} onChange={(e) => set('phase_code', e.target.value)} disabled={orderLocked} className={jobInput} />
           </label>
           <label><span className={label}>Ticket #</span>
-            <input value={draft.ticket_number} onChange={(e) => set('ticket_number', e.target.value)} disabled={locked} className={input} placeholder="Pre-printed number" />
+            <input value={draft.ticket_number} onChange={(e) => set('ticket_number', e.target.value)} disabled={locked} className={input} placeholder="Assigned when saved" />
+            <span className="block mt-1 text-[11px] text-gray-500">Using a paper pad too? Type its pre-printed number here.</span>
           </label>
         </div>
         {/* The order carries a few things the paper has no line for. They
@@ -791,7 +809,7 @@ export default function WorkOrderForm({
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
           {SAFETY_CHECK_ITEMS.map((item) => (
-            <label key={item.key} className="flex items-center gap-2 text-sm">
+            <label key={item.key} className="flex items-center gap-3 text-sm py-1.5 min-h-[44px]">
               <input
                 type="checkbox"
                 checked={safety.includes(item.key)}
@@ -799,7 +817,7 @@ export default function WorkOrderForm({
                 onChange={(e) => setSafety((cur) => (
                   e.target.checked ? [...cur.filter((k) => k !== item.key), item.key] : cur.filter((k) => k !== item.key)
                 ))}
-                className="h-4 w-4 rounded border-gray-300"
+                className="h-6 w-6 rounded border-gray-300 shrink-0"
               />
               <span>{item.label}</span>
             </label>
@@ -973,7 +991,7 @@ export default function WorkOrderForm({
             <button
               onClick={() => save(false)}
               disabled={!!busy}
-              className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+              className="px-5 py-3 text-base border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
             >
               {busy === 'save' ? 'Saving…' : 'Save draft'}
             </button>
@@ -981,9 +999,20 @@ export default function WorkOrderForm({
               <button
                 onClick={() => save(true)}
                 disabled={!!busy}
-                className="px-4 py-2 text-sm bg-brand-700 text-white rounded-md hover:bg-brand-900 disabled:opacity-50 font-medium"
+                className="px-5 py-3 text-base bg-brand-700 text-white rounded-md hover:bg-brand-900 disabled:opacity-50 font-medium"
               >
                 {busy === 'submit' ? 'Completing…' : status === 'rejected' ? 'Fix and send back' : 'Complete ticket'}
+              </button>
+            )}
+            {/* A draft started by mistake. The server only lets its author
+                (or staff) remove it, and only while it's still a draft. */}
+            {id && status === 'draft' && (
+              <button
+                onClick={discardDraft}
+                disabled={!!busy}
+                className="px-4 py-3 text-sm text-red-700 hover:underline disabled:opacity-50"
+              >
+                {busy === 'discard' ? 'Discarding…' : 'Discard draft'}
               </button>
             )}
           </>

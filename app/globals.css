@@ -5,6 +5,13 @@
 html, body { height: 100%; }
 body { background: #f9fafb; color: #111827; }
 
+/* On a phone, form controls at 16px stop iOS zooming the page in when a
+   box is tapped, and give a gloved thumb something to hit. */
+@media (max-width: 640px) {
+  input, select, textarea { font-size: 16px; }
+  input:not([type="checkbox"]):not([type="radio"]), select { min-height: 44px; }
+}
+
 /* Horizontal scrollers (e.g. mobile navbar) — hide the scrollbar but keep
    the scrolling behavior. */
 .scrollbar-hide::-webkit-scrollbar { display: none; }

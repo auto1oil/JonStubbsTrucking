@@ -252,11 +252,11 @@ export default function HaulerLoadsPage() {
                         />
                         <div className="flex gap-2 mt-2">
                           <button onClick={() => respond(l.id, 'decline')} disabled={busy === l.id}
-                            className="px-3 py-1.5 text-xs rounded-md bg-red-700 text-white font-medium hover:bg-red-800 disabled:opacity-50">
+                            className="px-4 py-2.5 text-sm rounded-md bg-red-700 text-white font-medium hover:bg-red-800 disabled:opacity-50 min-h-[44px]">
                             {busy === l.id ? 'Sending…' : 'Confirm decline'}
                           </button>
                           <button onClick={() => { setDeclining(null); setReason(''); }}
-                            className="px-3 py-1.5 text-xs rounded-md border border-gray-300 hover:bg-gray-50">
+                            className="px-4 py-2.5 text-sm rounded-md border border-gray-300 hover:bg-gray-50 min-h-[44px]">
                             Back
                           </button>
                         </div>
@@ -267,7 +267,7 @@ export default function HaulerLoadsPage() {
                           <select
                             value={unitFor[l.id] || ''}
                             onChange={(e) => setUnitFor({ ...unitFor, [l.id]: e.target.value })}
-                            className="px-2 py-1 border border-gray-300 rounded-md text-xs"
+                            className="px-2 py-2 border border-gray-300 rounded-md text-sm min-h-[44px]"
                           >
                             <option value="">Which unit?</option>
                             {fleet.map((u) => (
@@ -278,7 +278,7 @@ export default function HaulerLoadsPage() {
                         <select
                           value={driverFor[l.id] || meId || ''}
                           onChange={(e) => setDriverFor({ ...driverFor, [l.id]: e.target.value })}
-                          className="px-2 py-1 border border-gray-300 rounded-md text-xs"
+                          className="px-2 py-2 border border-gray-300 rounded-md text-sm min-h-[44px]"
                         >
                           {assignable.map((c) => (
                             <option key={c.id} value={c.id}>
@@ -287,11 +287,11 @@ export default function HaulerLoadsPage() {
                           ))}
                         </select>
                         <button onClick={() => respond(l.id, 'accept')} disabled={busy === l.id}
-                          className="px-3 py-1.5 text-xs rounded-md bg-brand-700 text-white font-medium hover:bg-brand-900 disabled:opacity-50">
+                          className="px-5 py-2.5 text-sm rounded-md bg-brand-700 text-white font-medium hover:bg-brand-900 disabled:opacity-50 min-h-[44px]">
                           {busy === l.id ? 'Sending…' : 'Accept'}
                         </button>
                         <button onClick={() => setDeclining(l.id)}
-                          className="px-3 py-1.5 text-xs rounded-md border border-gray-300 hover:bg-gray-50">
+                          className="px-4 py-2.5 text-sm rounded-md border border-gray-300 hover:bg-gray-50 min-h-[44px]">
                           Decline
                         </button>
                       </div>

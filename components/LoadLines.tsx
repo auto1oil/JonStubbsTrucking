@@ -1,10 +1,11 @@
 'use client';
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import {
   LOAD_STAMPS, MAX_LOADS, totalLoadTons, countLoads,
   type WorkOrderLoad, type LoadStampKey,
 } from '@/lib/work-orders';
+import { stampVerdict, fmtDistance, EXPECTED_LABEL, type OrderPins } from '@/lib/location-check';
 
 // The twenty-eight load lines off the paper haul ticket: per load, a ticket
 // number, the four in/out stamps, what it weighed, and what it carried.
@@ -62,6 +63,18 @@ const clockOf = (iso: string | null) =>
 // corner.
 const FAB_POS_KEY = 'jst-stamp-fab-pos';
 
+// A stamp the phone couldn't send: kept here with its time and fix until the
+// signal comes back, then sent in order. A tap in a pit with no bars must
+// never be lost or feel broken.
+type QueuedStamp = { loadNo: number; key: LoadStampKey; at: string; lat: number | null; lng: number | null; accuracy: number | null };
+const queueKey = (workOrderId: string) => `jst-stamp-queue:${workOrderId}`;
+
+// Whether a failed write looks like no signal rather than a refusal.
+function looksOffline(message: string): boolean {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  return /fetch|network|load failed|timed? ?out|connection/i.test(message);
+}
+
 export default function LoadLines({ workOrderId, locked = false, defaultMaterial = '', onTotalsChange }: Props) {
   const supabase = createClient();
   const [loads, setLoads] = useState<WorkOrderLoad[]>([]);
@@ -71,6 +84,11 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
   // Times shown before the row comes back from the database, so a tap reads as
   // instant even on a bad signal. Keyed "loadNo:stampKey".
   const [pending, setPending] = useState<Record<string, string>>({});
+  // Stamps waiting for signal, keyed the same way. Mirrored to localStorage
+  // so closing the app in the pit doesn't lose them.
+  const [queued, setQueued] = useState<Record<string, QueuedStamp>>({});
+  // The order's pit and job pins, so a stamp can say where it landed.
+  const [pins, setPins] = useState<OrderPins | null>(null);
 
   // Tell the funding app the ticket moved. Coalesced so a run of taps sends
   // once; fire-and-forget, and the server decides whether this hauler's
@@ -89,15 +107,98 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
       .select('*')
       .eq('work_order_id', workOrderId)
       .order('load_no');
-    setLoads((data as WorkOrderLoad[]) || []);
+    if (data) setLoads(data as WorkOrderLoad[]);
     setLoading(false);
   }, [supabase, workOrderId]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
   useEffect(() => {
-    onTotalsChange?.({ loads: countLoads(loads), tons: totalLoadTons(loads) });
-  }, [loads, onTotalsChange]);
+    fetch(`/api/work-orders/${workOrderId}/pins`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => { if (j.ok) setPins(j.pins ?? null); })
+      .catch(() => null);
+  }, [workOrderId]);
+
+  // ---- The offline queue ----------------------------------------------------
+  const persistQueue = (q: Record<string, QueuedStamp>) => {
+    try {
+      if (Object.keys(q).length) localStorage.setItem(queueKey(workOrderId), JSON.stringify(q));
+      else localStorage.removeItem(queueKey(workOrderId));
+    } catch { /* storage unavailable — the in-memory queue still works */ }
+  };
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(queueKey(workOrderId));
+      if (raw) setQueued(JSON.parse(raw) as Record<string, QueuedStamp>);
+    } catch { /* nothing queued */ }
+  }, [workOrderId]);
+
+  // One row per load, written by (ticket, load #) so an insert and an update
+  // are the same call and two taps can't make two rows.
+  const writeLoad = (loadNo: number, patch: Record<string, unknown>) =>
+    supabase.from('work_order_loads')
+      .upsert({ work_order_id: workOrderId, load_no: loadNo, ...patch }, { onConflict: 'work_order_id,load_no' });
+
+  const stampPatch = (q: QueuedStamp) => ({
+    [`${q.key}_at`]: q.at,
+    [`${q.key}_lat`]: q.lat,
+    [`${q.key}_lng`]: q.lng,
+    [`${q.key}_accuracy`]: q.accuracy,
+  });
+
+  const flushing = useRef(false);
+  const flushQueue = useCallback(async () => {
+    if (flushing.current || locked) return;
+    const items = Object.values(queued).sort((a, b) => a.at.localeCompare(b.at));
+    if (items.length === 0) return;
+    flushing.current = true;
+    let sent = 0;
+    try {
+      for (const q of items) {
+        const { error: err } = await writeLoad(q.loadNo, stampPatch(q));
+        if (err) break;
+        sent += 1;
+        setQueued((cur) => { const n = { ...cur }; delete n[`${q.loadNo}:${q.key}`]; persistQueue(n); return n; });
+      }
+    } finally {
+      flushing.current = false;
+    }
+    if (sent > 0) { setError(''); refresh(); pingProgress(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queued, locked, workOrderId]);
+
+  useEffect(() => {
+    flushQueue();
+    const onOnline = () => flushQueue();
+    window.addEventListener('online', onOnline);
+    const timer = setInterval(flushQueue, 20_000);
+    return () => { window.removeEventListener('online', onOnline); clearInterval(timer); };
+  }, [flushQueue]);
+
+  // What the cards show: the server's rows with any queued stamps laid on
+  // top, so a queued load counts, the next-stamp button moves on, and the
+  // totals match what will land.
+  const view = useMemo<WorkOrderLoad[]>(() => {
+    const byNo = new Map<number, WorkOrderLoad>(loads.map((l) => [l.load_no, { ...l }]));
+    for (const q of Object.values(queued)) {
+      const row = byNo.get(q.loadNo) ?? ({
+        id: `queued-${q.loadNo}`, work_order_id: workOrderId, load_no: q.loadNo, ticket_number: null, tons: null, material: null,
+        load_in_at: null, load_in_lat: null, load_in_lng: null, load_in_accuracy: null,
+        load_out_at: null, load_out_lat: null, load_out_lng: null, load_out_accuracy: null,
+        unload_in_at: null, unload_in_lat: null, unload_in_lng: null, unload_in_accuracy: null,
+        unload_out_at: null, unload_out_lat: null, unload_out_lng: null, unload_out_accuracy: null,
+        created_at: q.at, updated_at: q.at,
+      } as WorkOrderLoad);
+      Object.assign(row, stampPatch(q));
+      byNo.set(q.loadNo, row);
+    }
+    return [...byNo.values()].sort((a, b) => a.load_no - b.load_no);
+  }, [loads, queued, workOrderId]);
+
+  useEffect(() => {
+    onTotalsChange?.({ loads: countLoads(view), tons: totalLoadTons(view) });
+  }, [view, onTotalsChange]);
 
   async function stamp(loadNo: number, key: LoadStampKey) {
     if (locked) return;
@@ -107,35 +208,42 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
     setBusy(pk); setError('');
 
     const fix = await getFix();
-    const patch: Record<string, unknown> = {
-      [`${key}_at`]: at,
-      [`${key}_lat`]: fix?.lat ?? null,
-      [`${key}_lng`]: fix?.lng ?? null,
-      [`${key}_accuracy`]: fix?.accuracy ?? null,
-    };
+    const q: QueuedStamp = { loadNo, key, at, lat: fix?.lat ?? null, lng: fix?.lng ?? null, accuracy: fix?.accuracy ?? null };
 
-    const existing = loads.find((l) => l.load_no === loadNo);
-    const { error: err } = existing
-      ? await supabase.from('work_order_loads').update(patch).eq('id', existing.id)
-      : await supabase.from('work_order_loads')
-          .insert({ work_order_id: workOrderId, load_no: loadNo, ...patch });
+    // Anything already waiting goes first, so the order of the day holds.
+    if (Object.keys(queued).length > 0) await flushQueue();
+
+    const { error: err } = await writeLoad(loadNo, stampPatch(q));
 
     setBusy('');
     setPending((p) => { const n = { ...p }; delete n[pk]; return n; });
-    if (err) { setError(err.message); return; }
+    if (err) {
+      if (looksOffline(err.message)) {
+        // Keep it on the phone; it goes when the signal does.
+        setQueued((cur) => { const n = { ...cur, [pk]: q }; persistQueue(n); return n; });
+        return;
+      }
+      setError(err.message); return;
+    }
     refresh();
     pingProgress();
   }
 
   async function clearStamp(load: WorkOrderLoad, key: LoadStampKey) {
     if (locked) return;
-    setBusy(`${load.load_no}:${key}`); setError('');
-    const { error: err } = await supabase.from('work_order_loads').update({
+    const pk = `${load.load_no}:${key}`;
+    // A stamp that never left the phone is simply forgotten.
+    if (queued[pk]) {
+      setQueued((cur) => { const n = { ...cur }; delete n[pk]; persistQueue(n); return n; });
+      return;
+    }
+    setBusy(pk); setError('');
+    const { error: err } = await writeLoad(load.load_no, {
       [`${key}_at`]: null,
       [`${key}_lat`]: null,
       [`${key}_lng`]: null,
       [`${key}_accuracy`]: null,
-    }).eq('id', load.id);
+    });
     setBusy('');
     if (err) { setError(err.message); return; }
     refresh();
@@ -143,22 +251,23 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
   }
 
   async function setField(loadNo: number, field: 'ticket_number' | 'tons' | 'material', value: string) {
-    const existing = loads.find((l) => l.load_no === loadNo);
     const val = value === '' ? null : (field === 'tons' ? Number(value) : value);
     // Keep the field responsive while the write is in flight.
     setLoads((ls) => ls.map((l) => (l.load_no === loadNo ? { ...l, [field]: val } as WorkOrderLoad : l)));
-    if (existing) {
-      await supabase.from('work_order_loads').update({ [field]: val }).eq('id', existing.id);
-    } else {
-      await supabase.from('work_order_loads')
-        .insert({ work_order_id: workOrderId, load_no: loadNo, [field]: val });
-      refresh();
-    }
+    const { error: err } = await writeLoad(loadNo, { [field]: val });
+    if (err) { setError(looksOffline(err.message) ? 'No signal — that field didn\'t save. Try again when you have bars.' : err.message); return; }
+    refresh();
     pingProgress();
   }
 
   async function removeLoad(load: WorkOrderLoad) {
     if (locked) return;
+    // Drop anything queued for this load too.
+    setQueued((cur) => {
+      const n = Object.fromEntries(Object.entries(cur).filter(([, q]) => q.loadNo !== load.load_no));
+      persistQueue(n); return n;
+    });
+    if (String(load.id).startsWith('queued-')) return;
     setBusy(`del${load.load_no}`);
     await supabase.from('work_order_loads').delete().eq('id', load.id);
     setBusy('');
@@ -166,12 +275,13 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
     pingProgress();
   }
 
-  const nextNo = loads.length ? Math.max(...loads.map((l) => l.load_no)) + 1 : 1;
+  const nextNo = view.length ? Math.max(...view.map((l) => l.load_no)) + 1 : 1;
   // A blank row sits ready under the last one so the next load is always a
   // single tap away — no "add a row" step between loads.
-  const showBlank = !locked && loads.length < MAX_LOADS;
-  const tons = totalLoadTons(loads);
-  const count = countLoads(loads);
+  const showBlank = !locked && view.length < MAX_LOADS;
+  const tons = totalLoadTons(view);
+  const count = countLoads(view);
+  const queuedCount = Object.keys(queued).length;
 
   // ---- The floating stamp button ------------------------------------------
   // A driver mid-haul lives in the in/out cycle: load in → load out →
@@ -198,7 +308,7 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
   // twenty-eight lines are done.
   function nextStamp(): { loadNo: number; key: LoadStampKey; label: string } | null {
     const keys = LOAD_STAMPS.map((s) => s.key);
-    const stamped = [...loads]
+    const stamped = [...view]
       .sort((a, b) => a.load_no - b.load_no)
       .filter((l) => keys.some((k) => l[`${k}_at` as keyof WorkOrderLoad]));
     if (stamped.length === 0) return null;
@@ -254,16 +364,27 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
     }
   }
 
-  const input = 'w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm';
+  const input = 'w-full px-2 py-2.5 border border-gray-300 rounded-md text-base';
 
   function stampButton(loadNo: number, key: LoadStampKey, label: string, load?: WorkOrderLoad) {
     const pk = `${loadNo}:${key}`;
     const saved = load ? (load[`${key}_at`] as string | null) : null;
     const shown = pending[pk] || saved;
-    const hasFix = load ? load[`${key}_lat` as keyof WorkOrderLoad] != null : false;
+    const lat = load ? (load[`${key}_lat`] as number | null) : null;
+    const lng = load ? (load[`${key}_lng`] as number | null) : null;
+    const hasFix = lat != null && lng != null;
     const working = busy === pk;
+    const isQueued = !!queued[pk];
 
     if (shown) {
+      // Where the stamp landed, against the order's pin for that end.
+      const v = hasFix && !pending[pk] ? stampVerdict(pins, key, lat, lng) : null;
+      const place = v?.status === 'ok'
+        ? `✓ at ${EXPECTED_LABEL[v.expected]}`
+        : v?.status === 'off'
+          ? `⚠ ${fmtDistance(v.distance_m!)} from ${EXPECTED_LABEL[v.expected]}`
+          : hasFix ? '📍 located' : null;
+      const off = v?.status === 'off';
       return (
         <button
           key={key}
@@ -271,14 +392,19 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
           onClick={() => (load && !locked ? clearStamp(load, key) : undefined)}
           disabled={locked || working}
           title={locked ? undefined : 'Tap to clear'}
-          className="flex flex-col items-center justify-center rounded-md border border-emerald-300 bg-emerald-50 px-2 py-2 disabled:opacity-60"
+          className={`flex flex-col items-center justify-center rounded-md border px-2 py-3 min-h-[64px] disabled:opacity-60 ${
+            isQueued ? 'border-amber-300 bg-amber-50' : off ? 'border-red-300 bg-red-50' : 'border-emerald-300 bg-emerald-50'
+          }`}
         >
-          <span className="text-[10px] uppercase tracking-wide text-emerald-800">{label}</span>
-          <span className="text-sm font-semibold text-emerald-900 tabular-nums">
+          <span className={`text-[10px] uppercase tracking-wide ${isQueued ? 'text-amber-800' : off ? 'text-red-800' : 'text-emerald-800'}`}>{label}</span>
+          <span className={`text-sm font-semibold tabular-nums ${isQueued ? 'text-amber-900' : off ? 'text-red-900' : 'text-emerald-900'}`}>
             {clockOf(shown)}
           </span>
-          <span className="text-[10px] text-emerald-700">
-            {working ? 'saving…' : hasFix ? '📍 located' : pending[pk] ? 'locating…' : 'no fix'}
+          <span className={`text-[10px] ${isQueued ? 'text-amber-700' : off ? 'text-red-700 font-medium' : 'text-emerald-700'}`}>
+            {working ? 'saving…'
+              : isQueued ? 'saved on phone · sends with signal'
+              : pending[pk] ? 'locating…'
+              : (place || 'no fix')}
           </span>
         </button>
       );
@@ -289,7 +415,7 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
         type="button"
         onClick={() => stamp(loadNo, key)}
         disabled={locked || working}
-        className="flex flex-col items-center justify-center rounded-md border border-gray-300 bg-white px-2 py-2 hover:border-brand-700 hover:bg-gray-50 active:bg-gray-100 disabled:opacity-50"
+        className="flex flex-col items-center justify-center rounded-md border border-gray-300 bg-white px-2 py-3 min-h-[64px] hover:border-brand-700 hover:bg-gray-50 active:bg-gray-100 disabled:opacity-50"
       >
         <span className="text-[10px] uppercase tracking-wide text-gray-500">{label}</span>
         <span className="text-sm font-semibold text-brand-700">Tap</span>
@@ -363,6 +489,9 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
         <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Loads</h2>
         <span className="text-sm text-gray-600">
           <strong>{count}</strong> {count === 1 ? 'load' : 'loads'} · <strong>{tons.toFixed(2)}</strong> tons
+          {queuedCount > 0 && (
+            <span className="ml-2 text-amber-800">· {queuedCount} stamp{queuedCount === 1 ? '' : 's'} waiting for signal</span>
+          )}
         </span>
       </div>
 
@@ -372,9 +501,9 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
         <p className="text-sm text-gray-500">Loading…</p>
       ) : (
         <div className="space-y-2">
-          {loads.map((l) => loadCard(l.load_no, l))}
+          {view.map((l) => loadCard(l.load_no, l))}
           {showBlank && loadCard(nextNo)}
-          {loads.length >= MAX_LOADS && (
+          {view.length >= MAX_LOADS && (
             <p className="text-xs text-gray-500">
               That&apos;s all twenty-eight lines — the same as the paper ticket. Start
               a second ticket for anything past this.

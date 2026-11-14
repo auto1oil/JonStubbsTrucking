@@ -1,8 +1,12 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { authCookieLifetime, KEEP_COOKIE, KEEP_ALLOWED_ROLES } from '@/lib/keep-signed-in';
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
+  // "Keep me signed in" marker — see lib/keep-signed-in.ts. Only a driver-
+  // side role may carry it; a privileged login found with it loses it below.
+  let keep = request.cookies.get(KEEP_COOKIE)?.value === '1';
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,9 +18,9 @@ export async function middleware(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           response = NextResponse.next({ request });
           // Session-only auth cookies — no lifetime, so the sign-in dies
-          // with the browser/app and every fresh open logs in again.
+          // with the browser/app — unless this phone opted to stay signed in.
           cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, { ...options, maxAge: undefined, expires: undefined })
+            response.cookies.set(name, value, { ...options, ...authCookieLifetime(keep) })
           );
         },
       },
@@ -41,14 +45,21 @@ export async function middleware(request: NextRequest) {
   }
 
   // Force password change on first login — employees only. Customers set
-  // their own password at signup so they're never in this state.
-  if (user && isEmployeePath) {
+  // their own password at signup so they're never in this state. The same
+  // read checks that a "keep me signed in" marker belongs to a driver-side
+  // role; on anyone else it is removed and the auth cookies go back to
+  // session-only on their next refresh.
+  if (user && (isEmployeePath || keep)) {
     const { data: profile } = await supabase
       .from('profiles')
-      .select('must_change_password')
+      .select('must_change_password, role')
       .eq('id', user.id)
       .single();
-    if (profile?.must_change_password && path !== '/account') {
+    if (keep && !KEEP_ALLOWED_ROLES.includes(profile?.role || '')) {
+      keep = false;
+      response.cookies.set(KEEP_COOKIE, '', { maxAge: 0, path: '/' });
+    }
+    if (isEmployeePath && profile?.must_change_password && path !== '/account') {
       return NextResponse.redirect(new URL('/account', request.url));
     }
   }

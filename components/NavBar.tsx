@@ -9,6 +9,8 @@ import { navGroupForRole, featureKey, type Role } from '@/lib/feature-catalog';
 
 const supabase = createClient();
 
+import InstallBanner from '@/components/InstallBanner';
+
 export default function NavBar({ role, email }: { role: Role; email: string }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -59,6 +61,7 @@ export default function NavBar({ role, email }: { role: Role; email: string }) {
   }, [role, pathname]);
 
   async function logout() {
+    document.cookie = 'jst-keep=; Max-Age=0; path=/';
     await supabase.auth.signOut();
     router.push('/login');
     router.refresh();
@@ -234,6 +237,7 @@ export default function NavBar({ role, email }: { role: Role; email: string }) {
           })}
         </nav>
       </div>
+      <InstallBanner />
     </header>
   );
 }

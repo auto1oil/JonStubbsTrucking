@@ -1,7 +1,8 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
+import { KEEP_COOKIE } from '@/lib/keep-signed-in';
 
 // Everyone who uses this app is staff — crew, office, contractors, the funder,
 // admins — so there's one sign-in form, plus the forgot-password path.
@@ -13,6 +14,13 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [resetMsg, setResetMsg] = useState('');
+  // "Keep me signed in on this phone" — on by default where there's a touch
+  // screen, since that's a driver's phone far more often than an office PC.
+  // The server only honours it for driver-side roles.
+  const [keep, setKeep] = useState(false);
+  useEffect(() => {
+    try { setKeep(window.matchMedia('(pointer: coarse)').matches); } catch { /* leave off */ }
+  }, []);
 
   // Email a password-reset link. It lands on /reset-password, which sets the
   // new password and drops them at their own home screen. If the email never
@@ -41,7 +49,19 @@ export default function LoginPage() {
     } else {
       // Record the sign-in before moving on — identity comes from the fresh
       // session cookie, and a failure here never blocks the login itself.
-      await fetch('/api/auth/login-event', { method: 'POST', keepalive: true }).catch(() => null);
+      // The same call sets the keep-signed-in marker when allowed; the auth
+      // cookies were just written session-only, so refresh them once more
+      // through a client that sees the marker and gives them a lifetime.
+      try {
+        const res = await fetch('/api/auth/login-event', {
+          method: 'POST', keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keep }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (json.keep) await createClient().auth.refreshSession();
+        else document.cookie = `${KEEP_COOKIE}=; Max-Age=0; path=/`;
+      } catch { /* the sign-in stands either way */ }
       router.push('/');
       router.refresh();
     }
@@ -88,11 +108,18 @@ export default function LoginPage() {
                 className={input}
               />
             </div>
+            <label className="flex items-center gap-3 text-sm text-gray-700 py-1">
+              <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} className="h-5 w-5 rounded border-gray-300" />
+              <span>
+                Keep me signed in on this phone
+                <span className="block text-[11px] text-gray-500">For drivers and hauling companies. Office and admin logins always sign in each time.</span>
+              </span>
+            </label>
             {error && <p className="text-sm text-red-600">{error}</p>}
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2 bg-brand-700 text-white rounded-md hover:bg-brand-900 disabled:opacity-50 font-medium"
+              className="w-full py-3 text-base bg-brand-700 text-white rounded-md hover:bg-brand-900 disabled:opacity-50 font-medium"
             >
               {loading ? 'Signing in…' : 'Sign in'}
             </button>

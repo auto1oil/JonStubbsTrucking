@@ -134,6 +134,12 @@ export default function HaulerDriversPage() {
             &quot;Forgot password&quot; on the sign-in page.
           </p>
           <div className="mt-2 flex gap-3">
+            <a
+              href={`sms:?&body=${encodeURIComponent(`Your Jon Stubbs Trucking login\nSign in: ${typeof window !== 'undefined' ? window.location.origin : ''}/login\nEmail: ${created.email}\nTemp password: ${created.password}\nYou'll pick your own password the first time you sign in.`)}`}
+              className="text-xs text-brand-700 hover:underline"
+            >
+              Text it
+            </a>
             <button
               onClick={() => {
                 navigator.clipboard?.writeText(`Email: ${created.email}\nTemp password: ${created.password}`);

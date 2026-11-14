@@ -11,6 +11,7 @@ export default function NoAccessPage() {
 
   async function signOut() {
     const supabase = createClient();
+    document.cookie = 'jst-keep=; Max-Age=0; path=/';
     await supabase.auth.signOut();
     router.push('/login');
     router.refresh();

@@ -187,6 +187,34 @@ the screens are a convenience, not the boundary.
 - **Admin-only screens** — everything under `/admin` (Time Clock, Users,
   Deliveries, Customers, PO #, Dashboard) redirects any other role away.
 
+### On the phone
+
+What a driver feels every day, and the rules behind it:
+
+- **Stamps never fail for lack of signal.** A tap with no bars is kept on
+  the phone (time, GPS fix and all), shows amber "saved on phone · sends
+  with signal", and goes out in order when the signal returns or the app
+  is reopened. Load lines are written by (ticket, load #), so a retry can't
+  make a second row.
+- **The stamp says where it landed.** "✓ at the pit" or "⚠ 2.1 mi from the
+  job" the moment it saves, from the order's pins (`/api/work-orders/[id]/pins`,
+  the one way a hauler login can see them).
+- **New Ticket starts the ticket.** The draft is created on open, so the
+  load lines and the stamp button are the first thing on screen. A draft
+  started by mistake has a Discard button (author or staff, drafts only).
+- **Tickets number themselves** (`JST-001000`, …) when saved without a
+  number; a pad's pre-printed number can still be typed and wins.
+- **Keep me signed in on this phone.** Sign-ins are session-only by
+  default. A driver-side login (driver, labor, mechanic, hauler) may opt in
+  at sign-in; the marker cookie is set server-side (`lib/keep-signed-in.ts`)
+  and office/admin logins never get it. All three cookie writers (browser
+  client, server client, middleware) read the same marker.
+- **Install banner**, once per device, with Android's install prompt or the
+  two taps iPhone needs; **Text it** on every new login so a driver gets
+  their link and temp password by message; **Copy** on an order for the
+  repeat job; and phone-sized controls (16px inputs so iOS doesn't zoom,
+  44px tap targets, taller stamp buttons).
+
 ### The place check
 
 Every GPS stamp on a ticket is measured against the order it was filed on:
