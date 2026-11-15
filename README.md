@@ -215,19 +215,37 @@ What a driver feels every day, and the rules behind it:
   repeat job; and phone-sized controls (16px inputs so iOS doesn't zoom,
   44px tap targets, taller stamp buttons).
 
-### The Fleet tab (One Glovebox)
+### The Fleet tab
 
-The fleet program (trips, IFTA miles, fuel, receipts, maintenance,
-registrations, repairs, documents) runs inside this app on the **Fleet**
-tab, framed from oneglovebox.com with `embed=1`, this company's fleet ID,
-the brand name and the accent colour (`lib/fleet-embed.ts`). An admin
-pastes the fleet ID under Work Orders → Setup; `/api/fleet-embed` hands the
-frame address to any signed-in user. The frame is allowed geolocation
-(trip tracking), camera (receipt and odometer scans), clipboard and share,
-and the page waits for the program's `ogb:ready` message before showing it.
-Drivers sign in to it once with their One Glovebox account. Push
-notifications can't reach a framed page; One Glovebox's reminder emails
-still do. The tab can be switched off per role like any other.
+The fleet program, built in: the company's trucks and everything that
+happens to them, in this app's own tables (`fleet_*`, schema section 55),
+scoped like haul tickets (the company's own fleet, or a hauling company's
+own trucks; staff see all).
+
+- **Trucks** — unit, make/model/year, VIN, plate, latest odometer; one
+  page per truck with its documents, maintenance, repairs, fuel and trips.
+- **Registration & documents** — kind, number, issued/expires, photo or
+  PDF; expiry watched (30 days amber, past red) on the Fleet home and by
+  the daily cron at 30/14/7/1/0 days (`/api/cron/reminders`).
+- **Maintenance** — what was done, odometer, cost, receipt, and next due by
+  date or miles (suggested from the usual interval); due-by-miles uses
+  the truck's latest odometer, which trips and fill-ups keep current.
+- **Repairs** — reported → in the shop → fixed, with cost and photo.
+- **Trips and IFTA miles** — Start trip (truck + odometer), a GPS
+  breadcrumb every 30 s while the screen is open, End trip (odometer).
+  `POST /api/fleet/trips/[id]/ping` tags each point with its state from
+  bundled state outlines (`lib/us-states.ts`, `lib/data/us-states.json`,
+  no map service); `…/end` credits each leg to the state it started in,
+  takes the total from the odometer when both readings are in (phones stop
+  sending location in the background) and scales the split to it. Trips
+  done without the app are entered by hand, one state each.
+- **Fuel** — gallons, total, state bought in, odometer, receipt photo.
+- **Receipts** — tolls, scales, parts, lodging…, amount and photo.
+- **IFTA** — a quarter's miles and gallons by state, fleet MPG, taxable and
+  net gallons per state, per truck or all, as a table and a CSV. Rates are
+  applied on the return.
+
+Photos and PDFs go to the `fleet-files` bucket under the company's folder.
 
 ### The place check
 

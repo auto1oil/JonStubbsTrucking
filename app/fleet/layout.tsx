@@ -1,10 +1,12 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase-server';
 import NavBar from '@/components/NavBar';
+import FleetNav from '@/components/FleetNav';
 import { type Role } from '@/lib/feature-catalog';
 
-// The Fleet tab: the One Glovebox fleet program in a frame that fills
-// everything under the nav. No page padding — the frame is the page.
+// The fleet program: trucks, trips and IFTA miles, fuel, receipts,
+// maintenance, repairs and documents. Everyone who drives or dispatches
+// gets it; what they see is their own company's fleet.
 
 export default async function FleetLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
@@ -17,12 +19,15 @@ export default async function FleetLayout({ children }: { children: React.ReactN
     .eq('id', user.id)
     .single();
   if (!profile) redirect('/login');
-  if (profile.role === 'customer') redirect('/no-access');
+  if (profile.role === 'customer' || profile.role === 'funder' || profile.role === 'contractor') redirect('/no-access');
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-gray-50">
       <NavBar role={profile.role as Role} email={profile.email} />
-      <main className="flex-1 min-h-0">{children}</main>
+      <main className="max-w-5xl mx-auto px-4 py-4">
+        <FleetNav />
+        {children}
+      </main>
     </div>
   );
 }

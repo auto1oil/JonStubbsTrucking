@@ -3187,5 +3187,299 @@ notify pgrst, 'reload schema';
 
 
 -- ==========================================================================
+-- 55. The fleet program
+-- ==========================================================================
+-- The company's trucks and everything that happens to them: trips (and the
+-- IFTA miles by state they produce), fuel, receipts, maintenance, repairs,
+-- registrations and documents. Scoped like haul tickets: hauler_id null is
+-- the company's own fleet; a hauling company sees only its own. Staff see
+-- everything.
+-- ==========================================================================
+
+create or replace function public.fleet_can_see(h uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select public.is_admin()
+      or public.has_role(array['office'])
+      or (h is not distinct from public.my_hauler_id());
+$$;
+grant execute on function public.fleet_can_see(uuid) to authenticated;
+
+-- Every fleet row is pinned to its company on the way in: a hauling
+-- company's login can only ever write its own, a child row takes its
+-- truck's company, and created_by is whoever is signed in.
+create or replace function public.fleet_scope_row()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  mine uuid := public.my_hauler_id();
+begin
+  if tg_table_name <> 'fleet_trucks' then
+    begin
+      if new.truck_id is not null then
+        select hauler_id into new.hauler_id from public.fleet_trucks where id = new.truck_id;
+      end if;
+    exception when undefined_column then null;
+    end;
+  end if;
+  if mine is not null then new.hauler_id := mine; end if;
+  if tg_op = 'INSERT' and new.created_by is null then new.created_by := auth.uid(); end if;
+  return new;
+end;
+$$;
+
+create table if not exists public.fleet_trucks (
+  id          uuid primary key default gen_random_uuid(),
+  hauler_id   uuid references public.haulers(id) on delete cascade,
+  unit_number text not null,
+  make        text,
+  model       text,
+  year        integer,
+  vin         text,
+  plate       text,
+  plate_state text,
+  odometer    integer,
+  active      boolean not null default true,
+  notes       text,
+  created_by  uuid references public.profiles(id) on delete set null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists fleet_trucks_scope_idx on public.fleet_trucks (hauler_id, active);
+
+create table if not exists public.fleet_truck_documents (
+  id         uuid primary key default gen_random_uuid(),
+  truck_id   uuid not null references public.fleet_trucks(id) on delete cascade,
+  hauler_id  uuid references public.haulers(id) on delete cascade,
+  kind       text not null check (kind in ('registration','insurance','ifta_decal','irp_cab_card','annual_inspection','other')),
+  number     text,
+  issued_at  date,
+  expires_at date,
+  file_path  text,
+  notes      text,
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists fleet_docs_truck_idx on public.fleet_truck_documents (truck_id, expires_at);
+
+create table if not exists public.fleet_maintenance (
+  id                uuid primary key default gen_random_uuid(),
+  truck_id          uuid not null references public.fleet_trucks(id) on delete cascade,
+  hauler_id         uuid references public.haulers(id) on delete cascade,
+  kind              text not null check (kind in ('oil_change','tires','brakes','dot_annual','service','other')),
+  done_at           date not null default current_date,
+  odometer          integer,
+  cost              numeric(12,2),
+  vendor            text,
+  notes             text,
+  next_due_at       date,
+  next_due_odometer integer,
+  file_path         text,
+  created_by        uuid references public.profiles(id) on delete set null,
+  created_at        timestamptz not null default now()
+);
+create index if not exists fleet_maint_truck_idx on public.fleet_maintenance (truck_id, done_at desc);
+
+create table if not exists public.fleet_repairs (
+  id          uuid primary key default gen_random_uuid(),
+  truck_id    uuid not null references public.fleet_trucks(id) on delete cascade,
+  hauler_id   uuid references public.haulers(id) on delete cascade,
+  reported_at date not null default current_date,
+  reported_by uuid references public.profiles(id) on delete set null,
+  description text not null,
+  status      text not null default 'open' check (status in ('open','in_shop','done')),
+  cost        numeric(12,2),
+  done_at     date,
+  vendor      text,
+  notes       text,
+  file_path   text,
+  created_by  uuid references public.profiles(id) on delete set null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists fleet_repairs_truck_idx on public.fleet_repairs (truck_id, status);
+
+create table if not exists public.fleet_trips (
+  id             uuid primary key default gen_random_uuid(),
+  truck_id       uuid not null references public.fleet_trucks(id) on delete cascade,
+  hauler_id      uuid references public.haulers(id) on delete cascade,
+  driver_id      uuid references public.profiles(id) on delete set null,
+  started_at     timestamptz not null default now(),
+  ended_at       timestamptz,
+  odometer_start integer,
+  odometer_end   integer,
+  start_lat      numeric(9,6),
+  start_lng      numeric(9,6),
+  end_lat        numeric(9,6),
+  end_lng        numeric(9,6),
+  miles          numeric(10,1),
+  gps_miles      numeric(10,1),
+  manual         boolean not null default false,
+  state          text,
+  notes          text,
+  status         text not null default 'active' check (status in ('active','ended')),
+  created_by     uuid references public.profiles(id) on delete set null,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+create index if not exists fleet_trips_truck_idx on public.fleet_trips (truck_id, started_at desc);
+create index if not exists fleet_trips_driver_open_idx on public.fleet_trips (driver_id) where status = 'active';
+
+-- GPS breadcrumbs while a trip runs; each carries the state it fell in.
+create table if not exists public.fleet_trip_points (
+  id         uuid primary key default gen_random_uuid(),
+  trip_id    uuid not null references public.fleet_trips(id) on delete cascade,
+  at         timestamptz not null default now(),
+  lat        numeric(9,6) not null,
+  lng        numeric(9,6) not null,
+  accuracy_m numeric(10,2),
+  state      text
+);
+create index if not exists fleet_trip_points_trip_idx on public.fleet_trip_points (trip_id, at);
+
+-- Miles per state for an ended trip — what the IFTA return adds up.
+create table if not exists public.fleet_trip_states (
+  trip_id uuid not null references public.fleet_trips(id) on delete cascade,
+  state   text not null,
+  miles   numeric(10,1) not null default 0,
+  primary key (trip_id, state)
+);
+
+create table if not exists public.fleet_fuel (
+  id         uuid primary key default gen_random_uuid(),
+  truck_id   uuid not null references public.fleet_trucks(id) on delete cascade,
+  hauler_id  uuid references public.haulers(id) on delete cascade,
+  driver_id  uuid references public.profiles(id) on delete set null,
+  at         timestamptz not null default now(),
+  gallons    numeric(10,3) not null,
+  total      numeric(12,2),
+  odometer   integer,
+  state      text not null,
+  vendor     text,
+  file_path  text,
+  notes      text,
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists fleet_fuel_truck_idx on public.fleet_fuel (truck_id, at desc);
+create index if not exists fleet_fuel_at_idx on public.fleet_fuel (at desc);
+
+create table if not exists public.fleet_receipts (
+  id         uuid primary key default gen_random_uuid(),
+  truck_id   uuid references public.fleet_trucks(id) on delete set null,
+  hauler_id  uuid references public.haulers(id) on delete cascade,
+  driver_id  uuid references public.profiles(id) on delete set null,
+  at         timestamptz not null default now(),
+  amount     numeric(12,2) not null,
+  category   text not null check (category in ('toll','scale','parts','repair','lodging','meals','supplies','other')),
+  vendor     text,
+  file_path  text,
+  notes      text,
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists fleet_receipts_at_idx on public.fleet_receipts (at desc);
+
+-- Scope + created_by on every insert; touch updated_at where there is one.
+drop trigger if exists trg_fleet_trucks_scope on public.fleet_trucks;
+create trigger trg_fleet_trucks_scope before insert on public.fleet_trucks for each row execute function public.fleet_scope_row();
+drop trigger if exists trg_fleet_docs_scope on public.fleet_truck_documents;
+create trigger trg_fleet_docs_scope before insert on public.fleet_truck_documents for each row execute function public.fleet_scope_row();
+drop trigger if exists trg_fleet_maint_scope on public.fleet_maintenance;
+create trigger trg_fleet_maint_scope before insert on public.fleet_maintenance for each row execute function public.fleet_scope_row();
+drop trigger if exists trg_fleet_repairs_scope on public.fleet_repairs;
+create trigger trg_fleet_repairs_scope before insert on public.fleet_repairs for each row execute function public.fleet_scope_row();
+drop trigger if exists trg_fleet_trips_scope on public.fleet_trips;
+create trigger trg_fleet_trips_scope before insert on public.fleet_trips for each row execute function public.fleet_scope_row();
+drop trigger if exists trg_fleet_fuel_scope on public.fleet_fuel;
+create trigger trg_fleet_fuel_scope before insert on public.fleet_fuel for each row execute function public.fleet_scope_row();
+drop trigger if exists trg_fleet_receipts_scope on public.fleet_receipts;
+create trigger trg_fleet_receipts_scope before insert on public.fleet_receipts for each row execute function public.fleet_scope_row();
+drop trigger if exists trg_fleet_trucks_touch on public.fleet_trucks;
+create trigger trg_fleet_trucks_touch before update on public.fleet_trucks for each row execute function public.touch_updated_at();
+drop trigger if exists trg_fleet_repairs_touch on public.fleet_repairs;
+create trigger trg_fleet_repairs_touch before update on public.fleet_repairs for each row execute function public.touch_updated_at();
+drop trigger if exists trg_fleet_trips_touch on public.fleet_trips;
+create trigger trg_fleet_trips_touch before update on public.fleet_trips for each row execute function public.touch_updated_at();
+
+-- Grants + RLS: read and write within your company; delete is staff or
+-- whoever added the row.
+grant select, insert, update, delete on public.fleet_trucks, public.fleet_truck_documents, public.fleet_maintenance,
+  public.fleet_repairs, public.fleet_trips, public.fleet_trip_points, public.fleet_trip_states,
+  public.fleet_fuel, public.fleet_receipts to authenticated;
+alter table public.fleet_trucks          enable row level security;
+alter table public.fleet_truck_documents enable row level security;
+alter table public.fleet_maintenance     enable row level security;
+alter table public.fleet_repairs         enable row level security;
+alter table public.fleet_trips           enable row level security;
+alter table public.fleet_trip_points     enable row level security;
+alter table public.fleet_trip_states     enable row level security;
+alter table public.fleet_fuel            enable row level security;
+alter table public.fleet_receipts        enable row level security;
+
+drop policy if exists "fleet_trucks scope" on public.fleet_trucks;
+create policy "fleet_trucks scope" on public.fleet_trucks for all to authenticated
+  using (public.fleet_can_see(hauler_id)) with check (public.fleet_can_see(hauler_id));
+drop policy if exists "fleet_truck_documents scope" on public.fleet_truck_documents;
+create policy "fleet_truck_documents scope" on public.fleet_truck_documents for all to authenticated
+  using (public.fleet_can_see(hauler_id)) with check (public.fleet_can_see(hauler_id));
+drop policy if exists "fleet_maintenance scope" on public.fleet_maintenance;
+create policy "fleet_maintenance scope" on public.fleet_maintenance for all to authenticated
+  using (public.fleet_can_see(hauler_id)) with check (public.fleet_can_see(hauler_id));
+drop policy if exists "fleet_repairs scope" on public.fleet_repairs;
+create policy "fleet_repairs scope" on public.fleet_repairs for all to authenticated
+  using (public.fleet_can_see(hauler_id)) with check (public.fleet_can_see(hauler_id));
+drop policy if exists "fleet_trips scope" on public.fleet_trips;
+create policy "fleet_trips scope" on public.fleet_trips for all to authenticated
+  using (public.fleet_can_see(hauler_id)) with check (public.fleet_can_see(hauler_id));
+drop policy if exists "fleet_fuel scope" on public.fleet_fuel;
+create policy "fleet_fuel scope" on public.fleet_fuel for all to authenticated
+  using (public.fleet_can_see(hauler_id)) with check (public.fleet_can_see(hauler_id));
+drop policy if exists "fleet_receipts scope" on public.fleet_receipts;
+create policy "fleet_receipts scope" on public.fleet_receipts for all to authenticated
+  using (public.fleet_can_see(hauler_id)) with check (public.fleet_can_see(hauler_id));
+-- Breadcrumbs and state totals follow their trip.
+drop policy if exists "fleet_trip_points scope" on public.fleet_trip_points;
+create policy "fleet_trip_points scope" on public.fleet_trip_points for all to authenticated
+  using (exists (select 1 from public.fleet_trips t where t.id = fleet_trip_points.trip_id and public.fleet_can_see(t.hauler_id)))
+  with check (exists (select 1 from public.fleet_trips t where t.id = fleet_trip_points.trip_id and public.fleet_can_see(t.hauler_id)));
+drop policy if exists "fleet_trip_states scope" on public.fleet_trip_states;
+create policy "fleet_trip_states scope" on public.fleet_trip_states for all to authenticated
+  using (exists (select 1 from public.fleet_trips t where t.id = fleet_trip_states.trip_id and public.fleet_can_see(t.hauler_id)))
+  with check (exists (select 1 from public.fleet_trips t where t.id = fleet_trip_states.trip_id and public.fleet_can_see(t.hauler_id)));
+
+-- Photos and PDFs: receipts, documents, repair pictures. Folder is the
+-- company ("company" for the company's own fleet, else the hauler id).
+insert into storage.buckets (id, name, public)
+  values ('fleet-files', 'fleet-files', false)
+  on conflict (id) do nothing;
+
+drop policy if exists "fleet files upload" on storage.objects;
+create policy "fleet files upload" on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'fleet-files'
+    and (public.is_admin() or public.has_role(array['office'])
+      or (storage.foldername(name))[1] = coalesce(public.my_hauler_id()::text, 'company'))
+  );
+drop policy if exists "fleet files read" on storage.objects;
+create policy "fleet files read" on storage.objects
+  for select to authenticated
+  using (
+    bucket_id = 'fleet-files'
+    and (public.is_admin() or public.has_role(array['office'])
+      or (storage.foldername(name))[1] = coalesce(public.my_hauler_id()::text, 'company'))
+  );
+drop policy if exists "fleet files delete" on storage.objects;
+create policy "fleet files delete" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'fleet-files' and (public.is_admin() or public.has_role(array['office'])));
+
+grant select, insert, update, delete on public.fleet_trucks, public.fleet_truck_documents, public.fleet_maintenance,
+  public.fleet_repairs, public.fleet_trips, public.fleet_trip_points, public.fleet_trip_states,
+  public.fleet_fuel, public.fleet_receipts to service_role;
+
+notify pgrst, 'reload schema';
+
+
+-- ==========================================================================
 -- DONE
 -- ==========================================================================

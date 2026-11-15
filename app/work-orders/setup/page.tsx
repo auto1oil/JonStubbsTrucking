@@ -34,10 +34,7 @@ export default function WorkOrderSetupPage() {
   // The factoring hand-off: where approved factor-pay tickets get POSTed.
   // Master admin only — it's a credential, and RLS enforces the same line.
   const [isMaster, setIsMaster] = useState(false);
-  // The One Glovebox fleet program framed on the Fleet tab — admins set it.
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [fleetId, setFleetId] = useState('');
-  const [savedFleet, setSavedFleet] = useState(false);
+
   const [factorUrl, setFactorUrl] = useState('');
   const [factorKey, setFactorKey] = useState('');
   const [savedFactor, setSavedFactor] = useState(false);
@@ -52,19 +49,17 @@ export default function WorkOrderSetupPage() {
       const { data } = await supabase
         .from('app_settings')
         .select('key, value')
-        .in('key', ['work_order_qb_item_id', 'work_order_qb_item_name', 'factoring_webhook_url', 'factoring_api_key', 'oneglovebox_fleet_id']);
+        .in('key', ['work_order_qb_item_id', 'work_order_qb_item_name', 'factoring_webhook_url', 'factoring_api_key']);
       const m = new Map(((data as { key: string; value: string }[]) || []).map((r) => [r.key, r.value]));
       setItemId(m.get('work_order_qb_item_id') || '');
       setItemName(m.get('work_order_qb_item_name') || '');
       setFactorUrl(m.get('factoring_webhook_url') || '');
       setFactorKey(m.get('factoring_api_key') || '');
       setFactorSavedUrl((m.get('factoring_webhook_url') || '').trim());
-      setFleetId(m.get('oneglovebox_fleet_id') || '');
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         const { data: me } = await supabase.from('profiles').select('role').eq('id', user.id).single();
         setIsMaster(me?.role === 'master_admin');
-        setIsAdmin(me?.role === 'master_admin' || me?.role === 'admin');
       }
       await loadRates();
       // The QuickBooks catalog is only reachable through the server route.
@@ -99,15 +94,6 @@ export default function WorkOrderSetupPage() {
     ], { onConflict: 'key' });
     setSavedItem(true);
     setTimeout(() => setSavedItem(false), 1500);
-  }
-
-  async function saveFleet() {
-    setSavedFleet(false);
-    await supabase.from('app_settings').upsert([
-      { key: 'oneglovebox_fleet_id', value: fleetId.trim() },
-    ], { onConflict: 'key' });
-    setSavedFleet(true);
-    setTimeout(() => setSavedFleet(false), 1500);
   }
 
   async function saveFactoring() {
@@ -229,35 +215,6 @@ export default function WorkOrderSetupPage() {
             {testResult.ok ? '✓' : '✗'} {testResult.message}
           </p>
         )}
-      </div>
-      )}
-
-      {isAdmin && (
-      <div className="bg-white border border-gray-200 rounded-lg p-4 mb-5">
-        <h2 className="font-semibold mb-1">Fleet program (One Glovebox)</h2>
-        <p className="text-xs text-gray-500 mb-3">
-          Trips, IFTA miles, fuel, receipts, maintenance, registrations, repairs and
-          documents, on the <strong>Fleet</strong> tab inside this app. Paste the company&apos;s
-          fleet ID from One Glovebox (Settings → Admin → All users, on the owner&apos;s row,
-          &quot;Fleet ID&quot;). Drivers sign in there once with the One Glovebox account their
-          fleet invite went to.
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
-          <label className="text-xs text-gray-600 sm:col-span-2">Fleet ID
-            <input value={fleetId} onChange={(e) => setFleetId(e.target.value)}
-              placeholder="00000000-0000-0000-0000-000000000000" className={`${input} w-full block mt-1 font-mono`} />
-          </label>
-        </div>
-        <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <button onClick={saveFleet} className="px-3 py-1.5 text-sm bg-brand-700 text-white rounded-md hover:bg-brand-900 font-medium">
-            Save
-          </button>
-          {fleetId.trim() && (
-            <a href="/fleet" className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 font-medium">Open the Fleet tab</a>
-          )}
-          <span className="text-[11px] text-gray-500">Leave it blank to hide the program until it&apos;s ready.</span>
-        </div>
-        {savedFleet && <p className="text-xs text-emerald-700 mt-1">Saved ✓</p>}
       </div>
       )}
 

@@ -88,5 +88,33 @@ export async function GET(req: Request) {
     fired++;
   }
 
-  return NextResponse.json({ ok: true, fired });
+  // ---- Fleet: paperwork about to expire, maintenance coming due -----------
+  // Once at 30, 14, 7 and 1 days out (and the day of), to the office and
+  // admins, so a registration never lapses quietly.
+  let fleet = 0;
+  try {
+    const { data: staff } = await db.from('profiles').select('id').in('role', ['office', 'admin', 'master_admin']);
+    const ids = ((staff as { id: string }[]) || []).map((s) => s.id);
+    const marks = new Set([30, 14, 7, 1, 0]);
+    const daysTo = (iso: string) => Math.round((new Date(iso + 'T00:00:00').getTime() - new Date(today + 'T00:00:00').getTime()) / 86_400_000);
+    const say = async (title: string, body: string, link: string) => {
+      if (ids.length === 0) return;
+      await db.from('notifications').insert(ids.map((id) => ({ recipient_id: id, kind: 'fleet_due', title, body, link })));
+      fleet++;
+    };
+    const { data: docs } = await db.from('fleet_truck_documents')
+      .select('truck_id, kind, expires_at, truck:fleet_trucks(unit_number)').not('expires_at', 'is', null);
+    for (const d of (docs as unknown as { truck_id: string; kind: string; expires_at: string; truck: { unit_number: string } | null }[]) || []) {
+      const n = daysTo(d.expires_at);
+      if (marks.has(n)) await say(`Unit ${d.truck?.unit_number || '?'}: ${d.kind.replace(/_/g, ' ')} ${n === 0 ? 'expires today' : `expires in ${n} day${n === 1 ? '' : 's'}`}`, `Expires ${d.expires_at}.`, `/fleet/trucks/${d.truck_id}#documents`);
+    }
+    const { data: maint } = await db.from('fleet_maintenance')
+      .select('truck_id, kind, next_due_at, truck:fleet_trucks(unit_number)').not('next_due_at', 'is', null);
+    for (const m of (maint as unknown as { truck_id: string; kind: string; next_due_at: string; truck: { unit_number: string } | null }[]) || []) {
+      const n = daysTo(m.next_due_at);
+      if (marks.has(n)) await say(`Unit ${m.truck?.unit_number || '?'}: ${m.kind.replace(/_/g, ' ')} ${n === 0 ? 'due today' : `due in ${n} day${n === 1 ? '' : 's'}`}`, `Due ${m.next_due_at}.`, `/fleet/trucks/${m.truck_id}#maintenance`);
+    }
+  } catch { /* the reminders above already ran; the fleet nudge tries again tomorrow */ }
+
+  return NextResponse.json({ ok: true, fired, fleet });
 }

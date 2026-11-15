@@ -18,12 +18,18 @@ export default function TicketAttachment({
   path,
   onChange,
   readOnly = false,
+  bucket = BUCKET,
+  folder,
 }: {
   label: string;
   hint?: string;
   path: string | null;
   onChange?: (path: string | null) => void;
   readOnly?: boolean;
+  // Where the file goes. Defaults to the ticket bucket under the user's own
+  // folder; the fleet program passes its bucket and company folder.
+  bucket?: string;
+  folder?: string;
 }) {
   const supabase = createClient();
   const [url, setUrl] = useState<string | null>(null);
@@ -33,7 +39,7 @@ export default function TicketAttachment({
 
   const loadPreview = useCallback(async (p: string | null) => {
     if (!p) { setUrl(null); return; }
-    const { data } = await supabase.storage.from(BUCKET).createSignedUrl(p, 600);
+    const { data } = await supabase.storage.from(bucket).createSignedUrl(p, 600);
     setUrl(data?.signedUrl ?? null);
   }, [supabase]);
 
@@ -46,8 +52,8 @@ export default function TicketAttachment({
       if (!user) throw new Error('You are signed out — sign in again.');
       const small = await maybeCompressImage(file);
       const ext = (small.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-      const key = `${user.id}/${Date.now()}-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.${ext}`;
-      const { error: upErr } = await supabase.storage.from(BUCKET).upload(key, small, { upsert: false });
+      const key = `${folder || user.id}/${Date.now()}-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.${ext}`;
+      const { error: upErr } = await supabase.storage.from(bucket).upload(key, small, { upsert: false });
       if (upErr) throw upErr;
       onChange?.(key);
       await loadPreview(key);
@@ -69,7 +75,7 @@ export default function TicketAttachment({
   async function openFresh() {
     if (!path) return;
     const tab = window.open('about:blank', '_blank');
-    const { data, error: err } = await supabase.storage.from(BUCKET).createSignedUrl(path, 300);
+    const { data, error: err } = await supabase.storage.from(bucket).createSignedUrl(path, 300);
     if (err || !data?.signedUrl) {
       tab?.close();
       setError('Could not open that file — try again, or re-attach it.');
