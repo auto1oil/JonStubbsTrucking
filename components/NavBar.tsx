@@ -78,6 +78,7 @@ export default function NavBar({ role, email }: { role: Role; email: string }) {
     { href: '/admin/po',              label: 'PO #' },
     { href: '/admin/hours',           label: 'Time Clock' },
     { href: '/admin/users',           label: 'Users' },
+    { href: '/fleet',                 label: 'Fleet' },
   ];
   // Office reviews + invoices tickets; it doesn't run the rest of the shop.
   const officeLinks = [
@@ -88,6 +89,7 @@ export default function NavBar({ role, email }: { role: Role; email: string }) {
     { href: '/driver/hours',        label: 'Hours' },
     { href: '/tasks',               label: 'Tasks' },
     { href: '/reminders',           label: 'Reminders' },
+    { href: '/fleet',               label: 'Fleet' },
   ];
   // Field crew: fill out tickets, plus the delivery side of the business.
   const driverLinks = [
@@ -99,6 +101,7 @@ export default function NavBar({ role, email }: { role: Role; email: string }) {
     { href: '/driver/hours',          label: 'Hours' },
     { href: '/tasks',                 label: 'Tasks' },
     { href: '/reminders',             label: 'Reminders' },
+    { href: '/fleet',                 label: 'Fleet' },
   ];
   const contractorLinks = [
     { href: '/contractor',           label: 'Work Orders' },
@@ -111,6 +114,7 @@ export default function NavBar({ role, email }: { role: Role; email: string }) {
   const haulerDriverLinks = [
     { href: '/tickets',     label: 'My Tickets' },
     { href: '/tickets/new', label: 'New Ticket' },
+    { href: '/fleet',       label: 'Fleet' },
   ];
   const haulerLinks = [
     { href: '/hauler',              label: 'Loads' },
@@ -120,6 +124,7 @@ export default function NavBar({ role, email }: { role: Role; email: string }) {
     { href: '/hauler/availability', label: 'Availability' },
     { href: '/hauler/company',      label: 'Company' },
     { href: '/messages',            label: 'Messages' },
+    { href: '/fleet',               label: 'Fleet' },
   ];
   const funderLinks = [
     { href: '/funder',         label: 'Orders' },
@@ -130,6 +135,7 @@ export default function NavBar({ role, email }: { role: Role; email: string }) {
     { href: '/driver/hours', label: 'Hours' },
     { href: '/tasks',        label: 'Tasks' },
     { href: '/reminders',    label: 'Reminders' },
+    { href: '/fleet',        label: 'Fleet' },
   ];
   const baseLinks =
     role === 'admin' || role === 'master_admin'

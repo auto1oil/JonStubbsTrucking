@@ -215,6 +215,20 @@ What a driver feels every day, and the rules behind it:
   repeat job; and phone-sized controls (16px inputs so iOS doesn't zoom,
   44px tap targets, taller stamp buttons).
 
+### The Fleet tab (One Glovebox)
+
+The fleet program (trips, IFTA miles, fuel, receipts, maintenance,
+registrations, repairs, documents) runs inside this app on the **Fleet**
+tab, framed from oneglovebox.com with `embed=1`, this company's fleet ID,
+the brand name and the accent colour (`lib/fleet-embed.ts`). An admin
+pastes the fleet ID under Work Orders → Setup; `/api/fleet-embed` hands the
+frame address to any signed-in user. The frame is allowed geolocation
+(trip tracking), camera (receipt and odometer scans), clipboard and share,
+and the page waits for the program's `ogb:ready` message before showing it.
+Drivers sign in to it once with their One Glovebox account. Push
+notifications can't reach a framed page; One Glovebox's reminder emails
+still do. The tab can be switched off per role like any other.
+
 ### The place check
 
 Every GPS stamp on a ticket is measured against the order it was filed on:

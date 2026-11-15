@@ -54,6 +54,7 @@ export const FEATURES: Feature[] = [
   { group: 'admin', key: 'admin:/admin/po', label: 'PO #' },
   { group: 'admin', key: 'admin:/admin/hours', label: 'Time Clock' },
   { group: 'admin', key: 'admin:/admin/users', label: 'Users' },
+  { group: 'admin', key: 'admin:/fleet', label: 'Fleet' },
   // Office
   { group: 'office', key: 'office:/work-orders/orders', label: 'Orders' },
   { group: 'office', key: 'office:/work-orders', label: 'Tickets' },
@@ -62,6 +63,7 @@ export const FEATURES: Feature[] = [
   { group: 'office', key: 'office:/driver/hours', label: 'Hours' },
   { group: 'office', key: 'office:/tasks', label: 'Tasks' },
   { group: 'office', key: 'office:/reminders', label: 'Reminders' },
+  { group: 'office', key: 'office:/fleet', label: 'Fleet' },
   // Driver / crew
   { group: 'driver', key: 'driver:/tickets', label: 'My Tickets' },
   { group: 'driver', key: 'driver:/tickets/new', label: 'New Ticket' },
@@ -71,6 +73,7 @@ export const FEATURES: Feature[] = [
   { group: 'driver', key: 'driver:/driver/hours', label: 'Hours' },
   { group: 'driver', key: 'driver:/tasks', label: 'Tasks' },
   { group: 'driver', key: 'driver:/reminders', label: 'Reminders' },
+  { group: 'driver', key: 'driver:/fleet', label: 'Fleet' },
   // Contractor
   { group: 'contractor', key: 'contractor:/contractor', label: 'Work Orders' },
   { group: 'contractor', key: 'contractor:/contractor/approvals', label: 'Approvals' },
@@ -87,4 +90,5 @@ export const FEATURES: Feature[] = [
   { group: 'hauler', key: 'hauler:/hauler/availability', label: 'Availability' },
   { group: 'hauler', key: 'hauler:/hauler/company', label: 'Company' },
   { group: 'hauler', key: 'hauler:/messages', label: 'Messages' },
+  { group: 'hauler', key: 'hauler:/fleet', label: 'Fleet' },
 ];
