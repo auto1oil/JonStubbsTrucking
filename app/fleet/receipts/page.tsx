@@ -3,6 +3,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
 import TicketAttachment from '@/components/TicketAttachment';
+import ScanButton from '@/components/ScanButton';
 import { FLEET_BUCKET, RECEIPT_CATEGORIES, money, type FleetReceipt } from '@/lib/fleet';
 import { useFleetScope, useTrucks, truckLabel, fInput, fLabel, fCard, fBtn, fBtnGhost, numOrNull, txtOrNull } from '@/lib/fleet-client';
 
@@ -19,6 +20,15 @@ function ReceiptsInner() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [d, setD] = useState({ truck_id: '', at: new Date().toISOString().slice(0, 10), amount: '', category: 'toll', vendor: '', notes: '', file_path: null as string | null });
+
+  function scanned(f: Record<string, unknown>, filePath: string | null) {
+    const s = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+    setD((x) => ({
+      ...x,
+      amount: x.amount || s(f.amount), category: s(f.category) || x.category, vendor: x.vendor || s(f.vendor),
+      at: s(f.at) || x.at, notes: x.notes || s(f.description), file_path: x.file_path || filePath,
+    }));
+  }
 
   const refresh = useCallback(async () => {
     const { data } = await supabase.from('fleet_receipts').select('*').order('at', { ascending: false }).limit(100);
@@ -60,6 +70,7 @@ function ReceiptsInner() {
       {adding && (
         <div className={fCard}>
           <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2"><ScanButton kind="receipt" bucket={FLEET_BUCKET} folder={scope?.folder} label="Scan the receipt or bill" onScanned={scanned} /></div>
             <label><span className={fLabel}>Amount</span><input type="number" step="0.01" inputMode="decimal" value={d.amount} onChange={(e) => setD({ ...d, amount: e.target.value })} className={`${fInput} text-lg`} /></label>
             <label><span className={fLabel}>What for</span>
               <select value={d.category} onChange={(e) => setD({ ...d, category: e.target.value })} className={fInput}>{RECEIPT_CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select></label>

@@ -247,6 +247,18 @@ own trucks; staff see all).
 
 Photos and PDFs go to the `fleet-files` bucket under the company's folder.
 
+**Scanning.** Every fleet form has a Scan button: take a photo (or pick a
+PDF) of the registration, pump receipt, receipt or bill, service invoice
+or shop bill, and the form fills itself in — only blank boxes, so a typed
+value is never overwritten — while the photo is kept as the record's
+attachment. The read happens server-side (`/api/scan`) through the
+Anthropic SDK with a structured-output schema per document type
+(`lib/scan-schemas.ts`, every field nullable, plus a confidence and a
+notes line the form shows). Needs `ANTHROPIC_API_KEY` in Vercel; without
+it the button says scanning isn't set up. A scanned registration on the
+truck form also files itself as the truck's registration document with
+its expiry.
+
 ### The place check
 
 Every GPS stamp on a ticket is measured against the order it was filed on:

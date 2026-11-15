@@ -2,8 +2,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
-import { US_STATES, type FleetTruck } from '@/lib/fleet';
-import { fInput, fLabel, fCard, fBtn, fBtnGhost, numOrNull, txtOrNull } from '@/lib/fleet-client';
+import ScanButton from '@/components/ScanButton';
+import { US_STATES, FLEET_BUCKET, type FleetTruck } from '@/lib/fleet';
+import { useFleetScope, fInput, fLabel, fCard, fBtn, fBtnGhost, numOrNull, txtOrNull } from '@/lib/fleet-client';
 
 // Add or edit a truck. Unit number is the one thing it needs; the rest fills
 // in as the paperwork comes.
@@ -19,6 +20,28 @@ export default function TruckForm({ truck, onSaved }: { truck: FleetTruck | null
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const set = (k: string, val: string | boolean) => setD((x) => ({ ...x, [k]: val }));
+  const scope = useFleetScope();
+  // A scanned registration also files itself as the truck's registration
+  // document, with its expiry watched, once the truck is saved.
+  const [regDoc, setRegDoc] = useState<{ number: string | null; issued_at: string | null; expires_at: string | null; file_path: string | null } | null>(null);
+
+  function applyScan(f: Record<string, unknown>, filePath: string | null) {
+    const s = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+    setD((x) => ({
+      ...x,
+      // Fill only what's blank — a typed value is never overwritten.
+      unit_number: x.unit_number || s(f.unit_number),
+      year: x.year || s(f.year),
+      make: x.make || s(f.make),
+      model: x.model || s(f.model),
+      vin: x.vin || s(f.vin).toUpperCase(),
+      plate: x.plate || s(f.plate).toUpperCase(),
+      plate_state: s(f.plate_state) ? s(f.plate_state).toUpperCase() : x.plate_state,
+    }));
+    if (filePath || f.expires_at || f.registration_number) {
+      setRegDoc({ number: s(f.registration_number) || null, issued_at: s(f.issued_at) || null, expires_at: s(f.expires_at) || null, file_path: filePath });
+    }
+  }
 
   async function save() {
     if (!d.unit_number.trim()) { setError('Give the truck a unit number.'); return; }
@@ -31,6 +54,13 @@ export default function TruckForm({ truck, onSaved }: { truck: FleetTruck | null
     const { data, error: err } = truck
       ? await supabase.from('fleet_trucks').update(row).eq('id', truck.id).select('*').single()
       : await supabase.from('fleet_trucks').insert(row).select('*').single();
+    if (!err && regDoc) {
+      await supabase.from('fleet_truck_documents').insert({
+        truck_id: (data as FleetTruck).id, kind: 'registration', number: regDoc.number,
+        issued_at: regDoc.issued_at, expires_at: regDoc.expires_at, file_path: regDoc.file_path,
+      });
+      setRegDoc(null);
+    }
     setBusy(false);
     if (err) { setError(err.message); return; }
     onSaved?.(data as FleetTruck);
@@ -39,6 +69,15 @@ export default function TruckForm({ truck, onSaved }: { truck: FleetTruck | null
 
   return (
     <div className={fCard}>
+      <div className="mb-3 flex items-center gap-3 flex-wrap">
+        <ScanButton kind="registration" bucket={FLEET_BUCKET} folder={scope?.folder} label="Scan the registration" onScanned={applyScan} />
+        <span className="text-xs text-gray-500">Fills the VIN, plate, year, make and model, and files the registration with its expiry.</span>
+      </div>
+      {regDoc && (
+        <p className="text-xs text-emerald-700 mb-3">
+          Registration{regDoc.number ? ` #${regDoc.number}` : ''}{regDoc.expires_at ? `, expires ${regDoc.expires_at}` : ''} will be filed on this truck when you save.
+        </p>
+      )}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <label><span className={fLabel}>Unit number</span>
           <input value={d.unit_number} onChange={(e) => set('unit_number', e.target.value)} className={fInput} placeholder="248" /></label>

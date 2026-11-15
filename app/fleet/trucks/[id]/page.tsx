@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import TruckForm from '@/components/TruckForm';
 import TicketAttachment from '@/components/TicketAttachment';
+import ScanButton from '@/components/ScanButton';
 import {
   DOC_KINDS, MAINTENANCE_KINDS, REPAIR_STATUSES, FLEET_BUCKET, docDue, maintenanceDue, money, todayISO,
   type FleetTruck, type FleetDocument, type FleetMaintenance, type FleetRepair, type FleetFuel, type FleetTrip, type FleetTripState,
@@ -49,6 +50,24 @@ export default function TruckPage({ params }: { params: { id: string } }) {
   const [mt, setMt] = useState({ kind: 'oil_change', done_at: todayISO(), odometer: '', cost: '', vendor: '', notes: '', next_due_at: '', next_due_odometer: '', file_path: null as string | null });
   const [rp, setRp] = useState({ description: '', reported_at: todayISO(), notes: '', file_path: null as string | null });
   const [busy, setBusy] = useState(false);
+  const s = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+
+  // Scans fill only what's blank and attach the photo.
+  function scanDoc(f: Record<string, unknown>, filePath: string | null) {
+    setDoc((x) => ({ ...x, number: x.number || s(f.registration_number), issued_at: x.issued_at || s(f.issued_at), expires_at: x.expires_at || s(f.expires_at), file_path: x.file_path || filePath }));
+  }
+  function scanMaint(f: Record<string, unknown>, filePath: string | null) {
+    setMt((x) => ({
+      ...x,
+      kind: s(f.kind) || x.kind, done_at: s(f.done_at) || x.done_at, odometer: x.odometer || s(f.odometer), cost: x.cost || s(f.cost),
+      vendor: x.vendor || s(f.vendor), notes: x.notes || s(f.work_done), next_due_at: x.next_due_at || s(f.next_due_at),
+      next_due_odometer: x.next_due_odometer || s(f.next_due_odometer), file_path: x.file_path || filePath,
+    }));
+  }
+  function scanRepair(f: Record<string, unknown>, filePath: string | null) {
+    setRp((x) => ({ ...x, description: x.description || s(f.description), reported_at: s(f.done_at) || x.reported_at,
+      notes: x.notes || [s(f.vendor), s(f.cost) ? `$${s(f.cost)}` : '', s(f.details)].filter(Boolean).join(' · '), file_path: x.file_path || filePath }));
+  }
 
   // Picking a maintenance kind suggests the next due date/odometer from the
   // usual interval; the office can change it.
@@ -170,6 +189,7 @@ export default function TruckPage({ params }: { params: { id: string } }) {
         )
       ), (
         <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2"><ScanButton kind="registration" bucket={FLEET_BUCKET} folder={scope?.folder} label="Scan the document" onScanned={scanDoc} /></div>
           <label><span className={fLabel}>Document</span>
             <select value={doc.kind} onChange={(e) => setDoc({ ...doc, kind: e.target.value })} className={fInput}>{DOC_KINDS.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select></label>
           <label><span className={fLabel}>Number</span><input value={doc.number} onChange={(e) => setDoc({ ...doc, number: e.target.value })} className={fInput} /></label>
@@ -200,6 +220,7 @@ export default function TruckPage({ params }: { params: { id: string } }) {
         )
       ), (
         <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2"><ScanButton kind="maintenance" bucket={FLEET_BUCKET} folder={scope?.folder} label="Scan the service invoice" onScanned={scanMaint} /></div>
           <label><span className={fLabel}>What was done</span>
             <select value={mt.kind} onChange={(e) => pickMaintKind(e.target.value)} className={fInput}>{MAINTENANCE_KINDS.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select></label>
           <label><span className={fLabel}>Date</span><input type="date" value={mt.done_at} onChange={(e) => setMt({ ...mt, done_at: e.target.value })} className={fInput} /></label>
@@ -241,6 +262,7 @@ export default function TruckPage({ params }: { params: { id: string } }) {
         )
       ), (
         <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2"><ScanButton kind="repair" bucket={FLEET_BUCKET} folder={scope?.folder} label="Scan the shop bill" onScanned={scanRepair} /></div>
           <label className="col-span-2"><span className={fLabel}>What&apos;s wrong</span><input value={rp.description} onChange={(e) => setRp({ ...rp, description: e.target.value })} className={fInput} placeholder="Air leak at the rear brake chamber" /></label>
           <label><span className={fLabel}>Noticed on</span><input type="date" value={rp.reported_at} onChange={(e) => setRp({ ...rp, reported_at: e.target.value })} className={fInput} /></label>
           <label><span className={fLabel}>Notes</span><input value={rp.notes} onChange={(e) => setRp({ ...rp, notes: e.target.value })} className={fInput} /></label>

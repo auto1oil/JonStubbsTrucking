@@ -3,6 +3,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
 import TicketAttachment from '@/components/TicketAttachment';
+import ScanButton from '@/components/ScanButton';
 import { FLEET_BUCKET, US_STATES, money, type FleetFuel } from '@/lib/fleet';
 import { useFleetScope, useTrucks, truckLabel, fInput, fLabel, fCard, fBtn, fBtnGhost, numOrNull, txtOrNull } from '@/lib/fleet-client';
 
@@ -22,6 +23,18 @@ function FuelInner() {
   const [d, setD] = useState({
     truck_id: params.get('truck') || '', at: new Date().toISOString().slice(0, 16), gallons: '', total: '', odometer: '', state: 'UT', vendor: '', notes: '', file_path: null as string | null,
   });
+
+  function scanned(f: Record<string, unknown>, filePath: string | null) {
+    const s = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+    const when = s(f.at);
+    setD((x) => ({
+      ...x,
+      gallons: x.gallons || s(f.gallons), total: x.total || s(f.total), odometer: x.odometer || s(f.odometer),
+      state: s(f.state) ? s(f.state).toUpperCase() : x.state, vendor: x.vendor || s(f.vendor),
+      at: when ? (when.length === 10 ? `${when}T12:00` : when.slice(0, 16)) : x.at,
+      notes: x.notes || s(f.fuel_type), file_path: x.file_path || filePath,
+    }));
+  }
 
   const refresh = useCallback(async () => {
     const { data } = await supabase.from('fleet_fuel').select('*').order('at', { ascending: false }).limit(100);
@@ -75,6 +88,7 @@ function FuelInner() {
       {adding && (
         <div className={fCard}>
           <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2"><ScanButton kind="fuel" bucket={FLEET_BUCKET} folder={scope?.folder} label="Scan the pump receipt" onScanned={scanned} /></div>
             <label className="col-span-2"><span className={fLabel}>Truck</span>
               <select value={d.truck_id} onChange={(e) => setD({ ...d, truck_id: e.target.value })} className={fInput}>
                 {active.map((t) => <option key={t.id} value={t.id}>{truckLabel(t)}</option>)}
