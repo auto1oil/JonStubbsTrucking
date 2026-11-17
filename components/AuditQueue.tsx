@@ -70,10 +70,11 @@ const DEFAULT_KEYS = ['job_date', 'driver_name', 'trucking_company', 'unit_numbe
 // The place check is part of it: a stamp away from the pit or the job, a
 // stamp with no fix, or an order nobody pinned yet all stop the ticket from
 // passing on its own — the location has to match the job.
-function needsEyes(w: WorkOrder, loc?: LocationReport | null): string | null {
+function needsEyes(w: WorkOrder, loc?: LocationReport | null, hasBol = false): string | null {
   if (w.order_mismatch && !w.mismatch_cleared_at) return w.order_mismatch;
   if (!w.order_id) return 'no order — nothing to check it against';
-  if (!w.ticket_photo_path) return 'no photo of the paper ticket';
+  // The paper behind the ticket: a photo of the pad, or the BOL on each load.
+  if (!w.ticket_photo_path && !hasBol) return 'no photo of the paper ticket or the BOLs';
   // The foreman signing is what closes the day on site. Without it there is
   // nobody on the customer's side who agreed to these hours.
   if (!w.foreman_signature_path) return 'the job foreman never signed it';
@@ -161,7 +162,7 @@ export default function AuditQueue() {
       pit_lat: o.pit_lat, pit_lng: o.pit_lng, job_lat: o.job_lat, job_lng: o.job_lng, geo_radius_m: o.geo_radius_m,
     } : null, loadsByTicket[w.id] || []);
   };
-  const eyes = (w: WorkOrder) => needsEyes(w, locOf(w));
+  const eyes = (w: WorkOrder) => needsEyes(w, locOf(w), (loadsByTicket[w.id] || []).some((l) => !!l.bol_path));
 
   // A fresh photo link each time a ticket is expanded — minted on demand so
   // it can't sit open long enough to expire.

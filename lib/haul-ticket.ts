@@ -35,6 +35,26 @@ export async function startHaulTicket(
       db.from('profiles').select('full_name, email').eq('id', driverId).maybeSingle(),
     ]);
     const named = driver as { full_name: string | null; email: string } | null;
+    const unitRow = unit as { unit_number: string | null; equipment_type: string | null } | null;
+
+    // What the order says — contractor, both addresses, material — so the
+    // driver's screen is filled in before they touch it. Read with the
+    // service role: the hauler's own login can't see the order book.
+    let order: { customer_number: string | null; pit_address: string | null; job_address: string | null; material: string | null } | null = null;
+    if (load.order_id) {
+      const { data: o } = await db.from('job_orders').select('customer_number, pit_address, job_address, material').eq('id', load.order_id).maybeSingle();
+      order = (o as typeof order) ?? null;
+    }
+    // The truck's plate and type, from the fleet program if the unit is there.
+    let plate: string | null = null;
+    let truckType: string | null = null;
+    if (unitRow?.unit_number) {
+      const { data: ft } = await db.from('fleet_trucks').select('plate, make, model')
+        .eq('unit_number', unitRow.unit_number).eq('hauler_id', load.hauler_id).limit(1).maybeSingle();
+      const f = ft as { plate: string | null; make: string | null; model: string | null } | null;
+      plate = f?.plate ?? null;
+      truckType = f ? [f.make, f.model].filter(Boolean).join(' ') || null : null;
+    }
 
     const { data: wo, error } = await db
       .from('work_orders')
@@ -47,16 +67,18 @@ export async function startHaulTicket(
         trucking_company: (company as { name: string } | null)?.name ?? null,
         assigned_to: driverId,
         driver_name: named?.full_name || named?.email || actor.full_name || actor.email || null,
-        unit_number: (unit as { unit_number: string | null } | null)?.unit_number ?? null,
-        equipment_type:
-          (unit as { equipment_type: string | null } | null)?.equipment_type ?? load.equipment_type,
+        unit_number: unitRow?.unit_number ?? null,
+        equipment_type: unitRow?.equipment_type ?? load.equipment_type,
+        plate_number: plate,
+        truck_type: unitRow?.equipment_type || load.equipment_type || truckType,
         job_number: load.job_number,
         job_name: load.job_name,
+        customer_number: order?.customer_number ?? null,
         // The paper ticket has a line for each end of the run: the pit the
         // material is loaded at and the job it goes to.
-        pit_address: load.pickup,
-        job_address: load.dropoff || load.pickup,
-        material: load.material,
+        pit_address: load.pickup || order?.pit_address || null,
+        job_address: load.dropoff || order?.job_address || load.pickup,
+        material: load.material || order?.material || null,
         phase_code: load.phase_code,
         job_date: load.job_date,
         // What the hauler is owed. Never the customer's rate — that lives on

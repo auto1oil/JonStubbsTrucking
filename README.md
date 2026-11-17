@@ -259,6 +259,29 @@ it the button says scanning isn't set up. A scanned registration on the
 truck form also files itself as the truck's registration document with
 its expiry.
 
+### The driver's ticket
+
+`/tickets/[id]` for crews and hauler drivers is `components/HaulTicket.tsx`,
+built so the driver types almost nothing:
+
+- The header fills itself from the dispatched load and the order (customer,
+  job, pit and job addresses with map links, material), the driver's name
+  from their login, and the truck from the last unit used on that phone,
+  with plate and type looked up in the fleet program.
+- **Start is the first Load In stamp; End is the last Unload Out.** Both
+  follow the stamps until the driver changes one by hand (`start_auto` /
+  `stop_auto` flip off). Finish day fills a missing end from the last stamp.
+- Each load has a **BOL photo** button: the photo is kept on the load
+  (`work_order_loads.bol_path`) and read into the ticket # and tons when
+  those are blank (scan kind `bol`). BOL photos count as the paper in the
+  audit queue.
+- The driver enters only down time, travel/extra time, notes, and gets the
+  job foreman's signature (one button). "All OK" ticks the whole safety
+  list and stamps the time.
+- Everything saves itself about a second after it changes; Finish day sends
+  it to the office. The office still edits with the full form
+  (`components/WorkOrderForm.tsx`).
+
 ### The place check
 
 Every GPS stamp on a ticket is measured against the order it was filed on:

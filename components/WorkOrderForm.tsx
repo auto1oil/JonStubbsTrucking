@@ -8,6 +8,7 @@ import TicketSignature from '@/components/TicketSignature';
 import LoadLines from '@/components/LoadLines';
 import CustomerPicker from '@/components/CustomerPicker';
 import HaulerOnTicket from '@/components/HaulerOnTicket';
+import PaymentMethod from '@/components/PaymentMethod';
 import { orderLabel, ticketDefaultsFrom, type JobOrder } from '@/lib/job-orders';
 import {
   onSiteHours, totalHours, ticketAmount, billableUnit, billableQuantity,
@@ -219,11 +220,6 @@ export default function WorkOrderForm({
   // Rolled up from the load lines so the live total matches what the server
   // will bill — it recomputes from the same rows before invoicing.
   const [loadTotals, setLoadTotals] = useState<{ loads: number; tons: number }>({ loads: 0, tons: 0 });
-  // The factoring app's bill of sale for a Factor Payment ticket. The hauler
-  // signs it over there; completing the ticket requires the signature.
-  const [bos, setBos] = useState<{ url: string; accepted: boolean; accepted_by: string | null; accepted_at: string | null } | null>(null);
-  const [bosBusy, setBosBusy] = useState(false);
-  const [bosError, setBosError] = useState('');
 
   const id = workOrder?.id ?? null;
   const status = workOrder?.status ?? 'draft';
@@ -370,48 +366,6 @@ export default function WorkOrderForm({
     };
   }
 
-  // Fetch (and optionally open) the bill of sale. Idempotent server-side, so
-  // calling again is how we poll for the signature. Tab opens before the
-  // await — Safari blocks a window.open that comes after one.
-  async function loadBos(open: boolean) {
-    if (!id) return;
-    setBosBusy(true); setBosError('');
-    const tab = open ? window.open('about:blank', '_blank') : null;
-    try {
-      const res = await fetch(`/api/work-orders/${id}/bill-of-sale`, { method: 'POST' });
-      const json = await res.json();
-      if (!json.ok || !json.url) {
-        tab?.close();
-        setBosError(json.error || 'Could not get the bill of sale.');
-        return;
-      }
-      setBos({
-        url: json.url,
-        accepted: !!json.accepted,
-        accepted_by: json.accepted_by ?? null,
-        accepted_at: json.accepted_at ?? null,
-      });
-      if (tab) tab.location.href = json.url;
-    } catch {
-      tab?.close();
-      setBosError('Network error — try again.');
-    } finally {
-      setBosBusy(false);
-    }
-  }
-
-  // Picking Factor Payment fetches the document; coming back to this tab
-  // after signing in the other one re-checks it, so the green tick appears
-  // without a manual refresh.
-  useEffect(() => {
-    if (!isHauler || draft.payment_method !== 'factor' || !id) return;
-    if (!bos) loadBos(false);
-    const onFocus = () => loadBos(false);
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isHauler, draft.payment_method, id]);
-
   // Share the printable haul ticket — the phone's share sheet handles text,
   // email, AirDrop, whatever's on the device. The current fields are saved
   // first so the PDF matches the screen, then the fresh PDF is fetched and
@@ -476,11 +430,6 @@ export default function WorkOrderForm({
       });
       const json = await res.json();
       if (!json.ok) {
-        // Completing a Factor Payment ticket without the signed bill of sale
-        // saves everything and hands back the signing link — surface it.
-        if (json.bill_of_sale_url) {
-          setBos({ url: json.bill_of_sale_url, accepted: false, accepted_by: null, accepted_at: null });
-        }
         setError(json.error || 'Could not save the ticket.');
         return;
       }
@@ -551,14 +500,6 @@ export default function WorkOrderForm({
   const lockedField = `${input} bg-gray-100 text-gray-500 cursor-not-allowed`;
   const jobInput = orderLocked ? lockedField : input;
   const label = 'block text-xs font-medium text-gray-600 mb-1';
-
-  // The signature stops counting once the office sends the ticket back —
-  // the refreshed bill of sale has to be agreed to again.
-  const bosStale = !!(
-    bos?.accepted
-    && workOrder?.bos_reset_at
-    && (!bos.accepted_at || new Date(bos.accepted_at) <= new Date(workOrder.bos_reset_at))
-  );
 
   return (
     <div className="space-y-4">
@@ -899,87 +840,14 @@ export default function WorkOrderForm({
       {/* How the hauler wants paying. Factor hands the approved ticket to the
           factoring service to fund; standard waits on Jon Stubbs Trucking's pay run. */}
       {isHauler && (
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-1">
-            How do you want this ticket paid?
-          </h2>
-          <p className="text-xs text-gray-500 mb-3">
-            Factor Payment sends the approved ticket straight to the factoring
-            service to fund. Standard Pay stays on the normal pay run.
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {/* Factor Payment only exists once the company's Auto 1 Funding
-                account is linked — no account, no button. */}
-            {(factorAllowed
-              ? ([['standard', 'Standard Pay'], ['factor', 'Factor Payment']] as const)
-              : ([['standard', 'Standard Pay']] as const)
-            ).map(([value, title]) => (
-              <button
-                key={value}
-                type="button"
-                disabled={locked}
-                onClick={() => set('payment_method', value)}
-                className={`px-3 py-2.5 rounded-md border text-sm font-medium disabled:opacity-50 ${
-                  (draft.payment_method || 'standard') === value
-                    ? 'border-brand-700 bg-brand-700 text-white'
-                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                {title}
-              </button>
-            ))}
-          </div>
-          {!factorAllowed && (
-            <p className="mt-2 text-[11px] text-gray-500">
-              Factor Payment shows up here once your Auto 1 Funding account is
-              linked and approved — request it under{' '}
-              <Link href="/hauler/company" className="text-brand-700 hover:underline">Company</Link>.
-            </p>
-          )}
-
-          {/* Factor Payment comes with a bill of sale to sign at the
-              factoring app. Completing the ticket requires the signature. */}
-          {draft.payment_method === 'factor' && (
-            !id ? (
-              <p className="mt-3 text-xs text-gray-500">
-                Save the draft once and the bill of sale to sign appears here.
-              </p>
-            ) : bos?.accepted && !bosStale ? (
-              <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                Bill of sale signed
-                {bos.accepted_by ? ` by ${bos.accepted_by}` : ''}
-                {bos.accepted_at ? ` · ${new Date(bos.accepted_at).toLocaleString()}` : ''}.
-              </p>
-            ) : (
-              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
-                <p className="text-sm text-amber-900">
-                  {bosStale
-                    ? 'The office sent this ticket back, so the amounts changed. The refreshed bill of sale needs to be signed again before completing.'
-                    : 'The factoring company’s bill of sale needs your signature before this ticket can be completed. It reflects the last saved numbers — save the draft again if you just changed times or loads.'}
-                </p>
-                <div className="flex gap-2 mt-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => loadBos(true)}
-                    disabled={bosBusy}
-                    className="px-3 py-1.5 text-xs rounded-md bg-brand-700 text-white font-medium hover:bg-brand-900 disabled:opacity-50"
-                  >
-                    {bosBusy ? 'Working…' : 'Open & sign the bill of sale'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => loadBos(false)}
-                    disabled={bosBusy}
-                    className="px-3 py-1.5 text-xs rounded-md border border-gray-300 hover:bg-white disabled:opacity-50"
-                  >
-                    I signed it — check again
-                  </button>
-                </div>
-                {bosError && <p className="text-xs text-red-600 mt-1.5">{bosError}</p>}
-              </div>
-            )
-          )}
-        </div>
+        <PaymentMethod
+          id={id}
+          locked={locked}
+          value={draft.payment_method}
+          onChange={(v) => set('payment_method', v)}
+          factorAllowed={factorAllowed}
+          bosResetAt={workOrder?.bos_reset_at ?? null}
+        />
       )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}

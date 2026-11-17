@@ -6,6 +6,7 @@ import {
   type WorkOrderLoad, type LoadStampKey,
 } from '@/lib/work-orders';
 import { stampVerdict, fmtDistance, EXPECTED_LABEL, type OrderPins } from '@/lib/location-check';
+import ScanButton from '@/components/ScanButton';
 
 // The twenty-eight load lines off the paper haul ticket: per load, a ticket
 // number, the four in/out stamps, what it weighed, and what it carried.
@@ -26,6 +27,9 @@ type Props = {
   // otherwise, exactly like the ditto marks down the paper's MATERIAL column.
   defaultMaterial?: string;
   onTotalsChange?: (totals: { loads: number; tons: number }) => void;
+  // The rows as shown (server rows plus anything queued), for a parent that
+  // derives the day's start and end from the stamps.
+  onLoadsChange?: (loads: WorkOrderLoad[]) => void;
 };
 
 const GPS_TIMEOUT_MS = 8000;
@@ -75,7 +79,7 @@ function looksOffline(message: string): boolean {
   return /fetch|network|load failed|timed? ?out|connection/i.test(message);
 }
 
-export default function LoadLines({ workOrderId, locked = false, defaultMaterial = '', onTotalsChange }: Props) {
+export default function LoadLines({ workOrderId, locked = false, defaultMaterial = '', onTotalsChange, onLoadsChange }: Props) {
   const supabase = createClient();
   const [loads, setLoads] = useState<WorkOrderLoad[]>([]);
   const [loading, setLoading] = useState(true);
@@ -198,7 +202,8 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
 
   useEffect(() => {
     onTotalsChange?.({ loads: countLoads(view), tons: totalLoadTons(view) });
-  }, [view, onTotalsChange]);
+    onLoadsChange?.(view);
+  }, [view, onTotalsChange, onLoadsChange]);
 
   async function stamp(loadNo: number, key: LoadStampKey) {
     if (locked) return;
@@ -250,7 +255,24 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
     pingProgress();
   }
 
-  async function setField(loadNo: number, field: 'ticket_number' | 'tons' | 'material', value: string) {
+  // A BOL photo, read into the ticket # and tons when those boxes are blank.
+  async function applyBol(loadNo: number, f: Record<string, unknown>, filePath: string | null) {
+    const cur = view.find((l) => l.load_no === loadNo);
+    const s = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+    const patch: Record<string, unknown> = {};
+    if (filePath) patch.bol_path = filePath;
+    if (!cur?.ticket_number && s(f.ticket_number)) patch.ticket_number = s(f.ticket_number);
+    if ((cur?.tons == null) && typeof f.tons === 'number' && f.tons > 0) patch.tons = Math.round(f.tons * 100) / 100;
+    if (!cur?.material && s(f.material)) patch.material = s(f.material);
+    if (Object.keys(patch).length === 0) return;
+    setLoads((ls) => ls.map((l) => (l.load_no === loadNo ? { ...l, ...patch } as WorkOrderLoad : l)));
+    const { error: err } = await writeLoad(loadNo, patch);
+    if (err) { setError(looksOffline(err.message) ? 'No signal — the BOL didn\'t save. Try again when you have bars.' : err.message); return; }
+    refresh();
+    pingProgress();
+  }
+
+  async function setField(loadNo: number, field: 'ticket_number' | 'tons' | 'material' | 'bol_path', value: string) {
     const val = value === '' ? null : (field === 'tons' ? Number(value) : value);
     // Keep the field responsive while the write is in flight.
     setLoads((ls) => ls.map((l) => (l.load_no === loadNo ? { ...l, [field]: val } as WorkOrderLoad : l)));
@@ -366,6 +388,12 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
 
   const input = 'w-full px-2 py-2.5 border border-gray-300 rounded-md text-base';
 
+  async function openBol(path: string) {
+    const tab = window.open('about:blank', '_blank');
+    const { data } = await supabase.storage.from('work-tickets').createSignedUrl(path, 300);
+    if (data?.signedUrl && tab) tab.location.href = data.signedUrl; else tab?.close();
+  }
+
   function stampButton(loadNo: number, key: LoadStampKey, label: string, load?: WorkOrderLoad) {
     const pk = `${loadNo}:${key}`;
     const saved = load ? (load[`${key}_at`] as string | null) : null;
@@ -478,6 +506,21 @@ export default function LoadLines({ workOrderId, locked = false, defaultMaterial
               className={input}
             />
           </label>
+        </div>
+
+        {/* The BOL / scale ticket: one photo per load, read into the boxes
+            above. The photo is the paper behind the load. */}
+        <div className="mt-2 flex items-center gap-3 flex-wrap">
+          {load?.bol_path ? (
+            <>
+              <button type="button" onClick={() => openBol(load.bol_path!)} className="px-3 py-2 text-sm rounded-md border border-emerald-300 bg-emerald-50 text-emerald-900 font-medium min-h-[44px]">
+                ✓ BOL photo
+              </button>
+              {!locked && <button type="button" onClick={() => setField(loadNo, 'bol_path', '')} className="text-xs text-gray-400 hover:text-red-600">remove</button>}
+            </>
+          ) : !locked ? (
+            <ScanButton kind="bol" bucket="work-tickets" folder={undefined} label="BOL photo" onScanned={(f, p) => applyBol(loadNo, f, p)} />
+          ) : null}
         </div>
       </div>
     );

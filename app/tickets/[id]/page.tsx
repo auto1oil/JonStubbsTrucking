@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { STATUS_LABEL, STATUS_TONE, type WorkOrder, type WorkOrderStatus } from '@/lib/work-orders';
-import WorkOrderForm from '@/components/WorkOrderForm';
+import HaulTicket from '@/components/HaulTicket';
 
 // One of the crew's own tickets. A draft (or one that was sent back) is fully
 // editable; once the office has it, the form goes read-only and this page is
@@ -48,7 +48,7 @@ export default function TicketDetailPage({ params }: { params: { id: string } })
         </p>
       )}
 
-      <WorkOrderForm workOrder={wo} onSaved={setWo} />
+      <HaulTicket workOrder={wo} onSaved={setWo} />
     </div>
   );
 }

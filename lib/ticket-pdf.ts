@@ -21,15 +21,10 @@ import {
   type WorkOrder, type WorkOrderLoad,
 } from '@/lib/work-orders';
 
-// The printed header, hardcoded on purpose to mirror the paper pad. This is
-// the ONE place the company's identity lives on the ticket — copied from the
-// pad itself.
-export const COMPANY = {
-  name: 'Jon Stubbs Trucking',
-  addressLine: '60 SOUTH SLANT RD MAPLETON, UTAH 84664',
-  phoneLine: 'TRUCKING: JON - 801-428-7222   OFFICE: JEN - 801-919-4404, MEGAN - 435-681-0144',
-  emailLine: 'EMAIL: JONSTUBBSTRUCKINGLLC@GMAIL.COM',
-};
+// The printed header mirrors the paper pad; the words live in lib/company.ts
+// so the driver's screen and the PDF say the same thing.
+import { COMPANY } from '@/lib/company';
+export { COMPANY };
 
 // The fine print at the foot of the pad, word for word.
 const FINANCE_TERMS =

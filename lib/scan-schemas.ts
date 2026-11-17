@@ -9,7 +9,7 @@ const str = z.string().nullable();
 const num = z.number().nullable();
 const date = z.string().nullable().describe('YYYY-MM-DD, or null if not shown');
 
-export const SCAN_KINDS = ['registration', 'fuel', 'receipt', 'maintenance', 'repair'] as const;
+export const SCAN_KINDS = ['registration', 'fuel', 'receipt', 'maintenance', 'repair', 'bol'] as const;
 export type ScanKind = (typeof SCAN_KINDS)[number];
 
 export const SCAN_SCHEMAS = {
@@ -63,6 +63,16 @@ export const SCAN_SCHEMAS = {
     confidence: z.enum(['high', 'medium', 'low']),
     notes: str,
   }),
+  bol: z.object({
+    ticket_number: str.describe('the scale/BOL ticket number'),
+    tons: num.describe('NET weight in US tons; if only pounds are printed divide by 2000'),
+    material: str.describe('product/material name or code'),
+    at: date,
+    pit: str.describe('the pit, quarry or plant name'),
+    truck: str.describe('truck or unit number printed on it, else null'),
+    confidence: z.enum(['high', 'medium', 'low']),
+    notes: str,
+  }),
   repair: z.object({
     description: str.describe('what was wrong / what was repaired, in one line'),
     done_at: date,
@@ -77,6 +87,7 @@ export const SCAN_SCHEMAS = {
 };
 
 export const SCAN_PROMPTS: Record<ScanKind, string> = {
+  bol: 'This is a scale ticket, weigh ticket or bill of lading from a gravel pit, quarry or asphalt plant, for one truckload. Read the ticket number, the net weight in tons, and the material.',
   registration: 'This is a vehicle registration card or document for a truck. Read the vehicle identification and the registration dates.',
   fuel: 'This is a fuel receipt from a truck stop or gas station. Read the sale.',
   receipt: 'This is a receipt or bill a truck driver is turning in — a toll, a scale, parts, a motel, a meal, supplies. Read what was paid, to whom, and pick the closest category.',

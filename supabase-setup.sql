@@ -3481,5 +3481,21 @@ notify pgrst, 'reload schema';
 
 
 -- ==========================================================================
+-- 56. The driver's ticket: BOL photos, auto times, safety check time
+-- ==========================================================================
+-- The driver's screen fills itself: the start is the first Load In stamp,
+-- the end is the last Unload Out, unless the driver changed one by hand
+-- (then the app stops touching it). Each load keeps the photo of its BOL /
+-- scale ticket, read into the ticket # and tons. The safety check records
+-- when it was done.
+alter table public.work_order_loads add column if not exists bol_path text;
+alter table public.work_orders add column if not exists start_auto boolean not null default true;
+alter table public.work_orders add column if not exists stop_auto  boolean not null default true;
+alter table public.work_orders add column if not exists safety_checked_at timestamptz;
+
+notify pgrst, 'reload schema';
+
+
+-- ==========================================================================
 -- DONE
 -- ==========================================================================

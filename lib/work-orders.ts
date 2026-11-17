@@ -67,6 +67,11 @@ export type WorkOrder = {
   // (see SAFETY_CHECK_ITEMS) and the driver's initials under it.
   safety_check: string[];
   safety_initials: string | null;
+  safety_checked_at: string | null;
+  // The driver's screen sets start/stop from the stamps while these are
+  // true; a hand-typed time flips its flag off.
+  start_auto: boolean;
+  stop_auto: boolean;
   driver_start_at: string | null;
   driver_end_at: string | null;
   signed_out_state: 'loaded' | 'empty' | null;
@@ -176,6 +181,8 @@ export type WorkOrderLoad = {
   // What this load carried, when it differs from the ticket's material (the
   // paper has a MATERIAL column per load, mostly filled with ditto marks).
   material: string | null;
+  // The photo of this load's BOL / scale ticket.
+  bol_path: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -250,7 +257,8 @@ export const EDITABLE_FIELDS = [
   'job_address', 'day_number', 'phase_code', 'claim_number', 'unit_number',
   'equipment_type', 'fsr', 'job_date', 'driver_name', 'ticket_number',
   'hauler_id', 'hauler_load_id', 'trucking_company', 'material', 'supplier',
-  'pit_address', 'plate_number', 'safety_check', 'safety_initials',
+  'pit_address', 'plate_number', 'safety_check', 'safety_initials', 'safety_checked_at',
+  'start_auto', 'stop_auto',
   'truck_type', 'truck_type_tons', 'driver_start_at', 'driver_end_at',
   'signed_out_state', 'sign_out_at', 'foreman_signature_path',
   'signature_name', 'signature_signed_at',
