@@ -219,14 +219,17 @@ export default function LogTimePage() {
         const c = customers.find((x) => x.id === made.customer_id);
         return (
           <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-            <p className="text-sm text-emerald-900 font-medium">Invoice {invoiceNumber(made)} — {money(Number(made.total))} for {c?.name}</p>
-            {c?.email ? (
-              <a href={invoiceMailto(made, c)} className="mt-3 block w-full text-center py-4 rounded-xl bg-emerald-700 text-white text-lg font-semibold">
-                Email it to {c.email}
-              </a>
-            ) : (
-              <p className="text-sm text-amber-800 mt-2">No email on file for this customer — <Link href="/test/customers" className="underline">add one</Link>, then email it from the Invoices tab.</p>
+            <p className="text-sm text-emerald-900 font-medium">
+              ✓ Invoice #{invoiceNumber(made)} for {money(Number(made.total))} created in QuickBooks
+              {made.status === 'sent' ? ` and emailed to ${made.emailed_to}.` : '.'}
+            </p>
+            {made.status !== 'sent' && (
+              <p className="text-sm text-amber-800 mt-1">Not emailed — {c?.name} has no email on file. <Link href="/test/customers" className="underline">Add one</Link>, then press Send on the Invoices tab.</p>
             )}
+            <div className="flex gap-3 mt-3 flex-wrap">
+              <Link href={`/test/invoices/${made.id}`} className="px-4 py-2.5 rounded-lg bg-emerald-700 text-white text-sm font-semibold">View invoice</Link>
+              {c?.email && <a href={invoiceMailto(made, c)} className="px-4 py-2.5 rounded-lg border border-emerald-300 text-emerald-900 text-sm">Also email from my phone</a>}
+            </div>
           </div>
         );
       })()}
@@ -281,9 +284,9 @@ export default function LogTimePage() {
               </div>
               <button onClick={sendInvoice} disabled={busy === 'send' || total <= 0}
                 className="mt-3 w-full py-4 rounded-xl bg-slate-900 text-white text-lg font-semibold disabled:opacity-50">
-                {busy === 'send' ? 'Creating…' : `Create invoice — ${money(total)}`}
+                {busy === 'send' ? 'Sending…' : `Send invoice — ${money(total)}`}
               </button>
-              <p className="text-[11px] text-gray-500 mt-1.5 text-center">Creates the invoice, then one tap emails it to {cust.email || 'the customer'} from your phone.</p>
+              <p className="text-[11px] text-gray-500 mt-1.5 text-center">Creates the invoice in QuickBooks and emails it to {cust.email || 'the customer'}.</p>
             </>
           )}
         </div>

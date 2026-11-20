@@ -292,12 +292,16 @@ it to themselves). It has its own header and sub-tabs:
   big running clock (screen kept awake with the Wake Lock API) with the
   running dollar amount; Clock out. Underneath, the customer's unbilled
   time is tallied by service with **Send invoice**.
-- **Invoices** — every customer with time waiting (one tap creates the
-  invoice) and the invoices made, each with **Email** — a mailto link with
-  the invoice laid out, sent from the phone's own mail app
-  (`lib/test-email.ts`). QuickBooks comes later with the real app; the
-  connection code (`lib/test-qb.ts`, `test_qb_connection`, sandbox by
-  default, never Jon Stubbs' books) is in place but not shown.
+- **Invoices** — a QuickBooks card, every customer with time waiting (one
+  tap sends), and the invoices sent, each opening a QuickBooks-style
+  invoice view (`/test/invoices/[id]`). **QuickBooks is on standby: demo
+  mode.** With no company connected, sending plays the connected flow in
+  the app — the next invoice number from 1001, the customer marked as in
+  QuickBooks, the invoice marked emailed — and nothing leaves the app
+  (ids start `demo-`; a small "demo" tag shows it). Connecting a company
+  in `test_qb_connection` (`lib/test-qb.ts`, sandbox by default, never Jon
+  Stubbs' books) switches the same button to the real thing. An "email
+  from my phone" mailto is there to send a real email during the test.
 - **Services** — name, rate, per hour or per visit. Seeded: Site visit,
   $200/hr. Clocked hours are the quantity.
 - **Customers** — name, billing email (where QuickBooks emails the invoice),

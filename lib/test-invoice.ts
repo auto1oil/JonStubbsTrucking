@@ -30,13 +30,37 @@ export async function createInvoiceForCustomer(customerId: string, userId: strin
   // Claim the entries; only ones still unbilled are taken.
   await db.from('test_time_entries').update({ invoice_id: invoiceId }).in('id', entries.map((e) => e.id)).is('invoice_id', null);
 
-  // QuickBooks comes later. Until Trane's company is connected the invoice
-  // is complete here, and the screen offers to email it from the phone.
-  if ((await testQbStatus()).connected) await deliverInvoice(invoiceId);
+  await deliverInvoice(invoiceId);
   return { ok: true, invoiceId };
 }
 
+// Demo mode — QuickBooks on standby. Plays the connected flow inside the
+// app: the next QuickBooks-style invoice number, the customer marked as in
+// QuickBooks, the invoice marked emailed. Nothing leaves the app; ids start
+// with "demo-" so the real connection can tell them apart later.
+async function simulateDelivery(inv: TestInvoice, cust: TestCustomer): Promise<{ ok: boolean; status: string }> {
+  const db = createAdminClient();
+  let docNumber = inv.qb_doc_number;
+  if (!docNumber) {
+    const { data } = await db.from('test_invoices').select('qb_doc_number').not('qb_doc_number', 'is', null);
+    const nums = ((data as { qb_doc_number: string }[]) || []).map((r) => parseInt(r.qb_doc_number, 10)).filter(Number.isFinite);
+    docNumber = String(nums.length ? Math.max(...nums) + 1 : 1001);
+  }
+  if (!cust.qb_customer_id) await db.from('test_customers').update({ qb_customer_id: `demo-${cust.id.slice(0, 8)}` }).eq('id', cust.id);
+  const emailed = !!cust.email;
+  await db.from('test_invoices').update({
+    qb_invoice_id: inv.qb_invoice_id || `demo-${docNumber}`,
+    qb_doc_number: docNumber,
+    status: emailed ? 'sent' : 'invoiced',
+    emailed_to: emailed ? cust.email : null,
+    sent_at: emailed ? new Date().toISOString() : null,
+    error: emailed ? null : 'In QuickBooks, but the customer has no email address — add one on the Customers tab and press Send again.',
+  }).eq('id', inv.id);
+  return { ok: true, status: emailed ? 'sent' : 'invoiced' };
+}
+
 // Create the QuickBooks invoice (once) and email it. Safe to call again.
+// With no QuickBooks company connected, runs the demo instead.
 export async function deliverInvoice(invoiceId: string): Promise<{ ok: boolean; status: string; error?: string }> {
   const db = createAdminClient();
   const { data: row } = await db.from('test_invoices').select('*').eq('id', invoiceId).maybeSingle();
@@ -45,6 +69,8 @@ export async function deliverInvoice(invoiceId: string): Promise<{ ok: boolean; 
   const { data: c } = await db.from('test_customers').select('*').eq('id', inv.customer_id).maybeSingle();
   const cust = c as TestCustomer | null;
   if (!cust) return { ok: false, status: 'failed', error: 'customer not found' };
+
+  if (!(await testQbStatus()).connected) return simulateDelivery(inv, cust);
 
   const fail = async (msg: string) => {
     await db.from('test_invoices').update({ status: 'failed', error: msg }).eq('id', invoiceId);

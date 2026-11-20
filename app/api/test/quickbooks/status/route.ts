@@ -11,5 +11,5 @@ export async function GET() {
   const auth = await requireTestUser();
   if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
   const s = await testQbStatus();
-  return NextResponse.json({ ok: true, ...s, configured: testQbConfigured(), redirect_uri: testRedirectUri() });
+  return NextResponse.json({ ok: true, ...s, demo: !s.connected, configured: testQbConfigured(), redirect_uri: testRedirectUri() });
 }
