@@ -70,12 +70,12 @@ export default function TestTeam() {
     <div className="space-y-4">
       <form onSubmit={add} className="bg-white border border-gray-200 rounded-xl p-4 space-y-2">
         <h2 className="font-semibold">Add a test user</h2>
-        <p className="text-xs text-gray-500">They sign in at the normal Jon Stubbs page and land right here, in the Test tab only.</p>
+        <p className="text-xs text-gray-500">They sign in at the normal Jon Stubbs page and land right here, in the Test tab only. Leave the password blank and the app makes a temporary one.</p>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. Tony Trane)"
           className="w-full px-3 py-2.5 border border-gray-300 rounded-lg" />
         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" type="email" required
           autoCapitalize="none" autoCorrect="off" className="w-full px-3 py-2.5 border border-gray-300 rounded-lg" />
-        <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password (leave blank for a temporary one)"
+        <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password (optional)"
           autoCapitalize="none" autoCorrect="off" className="w-full px-3 py-2.5 border border-gray-300 rounded-lg" />
         {error && <p className="text-sm text-red-700">{error}</p>}
         <button disabled={busy} className="w-full py-3 rounded-lg bg-slate-900 text-white font-semibold disabled:opacity-50">

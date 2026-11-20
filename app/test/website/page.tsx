@@ -1,10 +1,22 @@
+'use client';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { createClient } from '@/lib/supabase-browser';
 import { TRANE } from '@/lib/test-email';
+import SitePhoto from '@/components/SitePhoto';
 
 // A mock website for Trane Engineering, P.C., inside the Test tab. The firm's
 // details (name, address, phone, fax, services, website, access) are the ones
-// the owner gave. Tony's license details, photo and named projects are still
-// placeholders in brackets.
+// the owner gave. The photo spots and project cards are filled in from the
+// phone: tap a spot to add a picture, tap Edit on a card to name the project.
+
+type Content = { slot: string; photo_path: string | null; title: string | null; subtitle: string | null };
+
+const PROJECTS = [
+  { slot: 'project1', title: 'Road improvement project' },
+  { slot: 'project2', title: 'Storm drain / detention project' },
+  { slot: 'project3', title: 'Subdivision plat & survey' },
+];
 
 const SERVICES = [
   { t: 'Land surveying', d: 'Boundary and topographic surveys, ALTA/NSPS surveys, subdivision and condominium plats, and construction staking.' },
@@ -22,10 +34,36 @@ const WHY = [
 ];
 
 export default function TraneWebsite() {
+  const [content, setContent] = useState<Record<string, Content>>({});
+
+  useEffect(() => {
+    createClient().from('test_site_content').select('slot, photo_path, title, subtitle').then(({ data }) => {
+      const map: Record<string, Content> = {};
+      for (const r of (data as Content[]) || []) map[r.slot] = r;
+      setContent(map);
+    });
+  }, []);
+
+  const photo = (slot: string) => content[slot]?.photo_path ?? null;
+  const saved = (slot: string, path: string) =>
+    setContent((c) => ({ ...c, [slot]: { slot, title: c[slot]?.title ?? null, subtitle: c[slot]?.subtitle ?? null, photo_path: path } }));
+
+  async function editProject(slot: string, fallback: string) {
+    const cur = content[slot];
+    const title = window.prompt('Project name', cur?.title || fallback);
+    if (title === null) return;
+    const subtitle = window.prompt('Place and year (e.g. Lehi, Utah · 2024)', cur?.subtitle || 'Lehi, Utah');
+    if (subtitle === null) return;
+    const row = { slot, title: title.trim() || null, subtitle: subtitle.trim() || null, updated_at: new Date().toISOString() };
+    const { error } = await createClient().from('test_site_content').upsert(row, { onConflict: 'slot' });
+    if (error) { alert(error.message); return; }
+    setContent((c) => ({ ...c, [slot]: { slot, photo_path: c[slot]?.photo_path ?? null, title: row.title, subtitle: row.subtitle } }));
+  }
+
   return (
     <div className="-mx-4 -my-4 bg-white">
       <div className="bg-amber-50 border-b border-amber-200 text-amber-900 text-xs px-4 py-2">
-        Mock website. Firm details are real; bracketed items (license, photo, named projects) still need Tony&apos;s information.
+        Mock website. Firm details are real. Tap any photo spot to add a picture from your phone, and tap Edit on a project card to name it.
       </div>
 
       <section className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-900 text-white px-6 py-14">
@@ -53,9 +91,8 @@ export default function TraneWebsite() {
           </p>
           <p className="text-sm text-gray-500 mt-3">[Tony Trane, P.E. — Utah license no. and education to be added]</p>
         </div>
-        <div className="rounded-2xl bg-slate-100 aspect-square flex items-center justify-center text-slate-400 text-sm text-center p-4">
-          [Photo of Tony or the Main Street office]
-        </div>
+        <SitePhoto slot="about" path={photo('about')} label="Tony or the Main Street office" onSaved={saved}
+          className="rounded-2xl aspect-square" />
       </section>
 
       <section id="services" className="bg-slate-50 px-6 py-12">
@@ -86,14 +123,20 @@ export default function TraneWebsite() {
       <section className="bg-slate-900 text-white px-6 py-12">
         <h2 className="text-2xl font-bold">Lehi City work</h2>
         <p className="text-slate-300 mt-2 max-w-xl text-sm">
-          Survey and engineering filings for Lehi City projects are on Engage Lehi. [Replace these cards with featured projects, dates and photos.]
+          Survey and engineering filings for Lehi City projects are on Engage Lehi.
         </p>
         <div className="grid sm:grid-cols-3 gap-4 mt-6">
-          {['[Road improvement project]', '[Storm drain / detention project]', '[Subdivision plat & survey]'].map((p) => (
-            <div key={p} className="rounded-xl bg-white/5 border border-white/10 p-5">
-              <div className="aspect-video rounded-lg bg-white/10 mb-3" />
-              <div className="font-medium">{p}</div>
-              <div className="text-xs text-slate-400 mt-1">Lehi, Utah · [year]</div>
+          {PROJECTS.map((p) => (
+            <div key={p.slot} className="rounded-xl bg-white/5 border border-white/10 p-5">
+              <SitePhoto slot={p.slot} path={photo(p.slot)} label="A photo of this project" onSaved={saved} dark
+                className="aspect-video rounded-lg mb-3" />
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium">{content[p.slot]?.title || p.title}</div>
+                  <div className="text-xs text-slate-400 mt-1">{content[p.slot]?.subtitle || 'Lehi, Utah'}</div>
+                </div>
+                <button type="button" onClick={() => editProject(p.slot, p.title)} className="text-xs underline text-slate-400 shrink-0">Edit</button>
+              </div>
             </div>
           ))}
         </div>

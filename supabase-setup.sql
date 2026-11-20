@@ -3650,5 +3650,45 @@ $$;
 grant execute on function public.is_test_user() to authenticated;
 
 -- ==========================================================================
+-- 59. Test tab website: photos and project cards
+-- ==========================================================================
+-- Anyone with the Test tab can tap a photo spot on the mock Trane website
+-- and add a picture from their phone, and fill in the project cards. Photos
+-- go to the public 'test-site' bucket (it's a website); one row per spot.
+-- ==========================================================================
+
+create table if not exists public.test_site_content (
+  slot       text primary key,
+  photo_path text,
+  title      text,
+  subtitle   text,
+  updated_at timestamptz not null default now()
+);
+alter table public.test_site_content enable row level security;
+
+drop policy if exists "Test users read site content" on public.test_site_content;
+create policy "Test users read site content" on public.test_site_content for select
+  using (public.is_test_user());
+drop policy if exists "Test users write site content" on public.test_site_content;
+create policy "Test users write site content" on public.test_site_content for all
+  using (public.is_test_user()) with check (public.is_test_user());
+
+insert into storage.buckets (id, name, public)
+values ('test-site', 'test-site', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists "Test users add site photos" on storage.objects;
+create policy "Test users add site photos" on storage.objects for insert to authenticated
+  with check (bucket_id = 'test-site' and public.is_test_user());
+drop policy if exists "Test users change site photos" on storage.objects;
+create policy "Test users change site photos" on storage.objects for update to authenticated
+  using (bucket_id = 'test-site' and public.is_test_user());
+drop policy if exists "Test users remove site photos" on storage.objects;
+create policy "Test users remove site photos" on storage.objects for delete to authenticated
+  using (bucket_id = 'test-site' and public.is_test_user());
+
+notify pgrst, 'reload schema';
+
+-- ==========================================================================
 -- DONE
 -- ==========================================================================
