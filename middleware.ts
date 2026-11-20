@@ -49,10 +49,17 @@ export async function middleware(request: NextRequest) {
   // read checks that a "keep me signed in" marker belongs to a driver-side
   // role; on anyone else it is removed and the auth cookies go back to
   // session-only on their next refresh.
-  if (user && (isEmployeePath || keep)) {
+  //
+  // A test-only login (a plain sign-in an admin marked as a test user, with
+  // no staff role) is kept inside the Test tab: any other page sends it
+  // back there. API calls, files (anything with an extension) and the
+  // sign-in/password pages are left alone.
+  const isPage = !path.startsWith('/api') && !/\.[a-z0-9]+$/i.test(path);
+  const testAllowed = path.startsWith('/test') || path === '/login' || path === '/reset-password' || path === '/account' || path.startsWith('/legal');
+  if (user && (isEmployeePath || keep || (isPage && !testAllowed))) {
     const { data: profile } = await supabase
       .from('profiles')
-      .select('must_change_password, role')
+      .select('must_change_password, role, is_test_user')
       .eq('id', user.id)
       .single();
     if (keep && !KEEP_ALLOWED_ROLES.includes(profile?.role || '')) {
@@ -61,6 +68,10 @@ export async function middleware(request: NextRequest) {
     }
     if (isEmployeePath && profile?.must_change_password && path !== '/account') {
       return NextResponse.redirect(new URL('/account', request.url));
+    }
+    const testOnly = profile?.role === 'customer' && !!(profile as { is_test_user?: boolean }).is_test_user;
+    if (testOnly && isPage && !testAllowed) {
+      return NextResponse.redirect(new URL('/test', request.url));
     }
   }
 

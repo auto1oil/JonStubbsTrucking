@@ -22,7 +22,7 @@ export type TestInvoice = {
 
 export const BUSINESS = {
   name: 'Trane Engineering',
-  tagline: 'Civil engineering · Lehi, Utah',
+  tagline: 'Civil engineering & land surveying · Lehi, Utah',
 };
 
 // Hours between two instants, to two decimals.

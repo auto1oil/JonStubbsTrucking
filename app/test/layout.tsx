@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase-server';
 import TestNav from '@/components/TestNav';
+import SignOutButton from '@/components/SignOutButton';
 import { BUSINESS } from '@/lib/test-time';
 
 // The Test tab: Trane Engineering, a trial business inside the app. Only a
@@ -27,6 +28,7 @@ export default async function TestLayout({ children }: { children: React.ReactNo
           <div className="flex items-center gap-3 text-xs">
             {staff && <Link href="/" className="text-slate-300 hover:text-white">← Jon Stubbs</Link>}
             <span className="text-slate-400 hidden sm:inline">{profile?.email}</span>
+            <SignOutButton className="text-slate-300 hover:text-white underline" />
           </div>
         </div>
         <TestNav />

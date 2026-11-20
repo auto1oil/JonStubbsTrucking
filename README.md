@@ -292,9 +292,12 @@ it to themselves). It has its own header and sub-tabs:
   big running clock (screen kept awake with the Wake Lock API) with the
   running dollar amount; Clock out. Underneath, the customer's unbilled
   time is tallied by service with **Send invoice**.
-- **Invoices** — Trane's own QuickBooks connection (`test_qb_connection`,
-  sandbox by default, `lib/test-qb.ts`, never Jon Stubbs' books), every
-  customer with time waiting, and sent invoices with Retry.
+- **Invoices** — every customer with time waiting (one tap creates the
+  invoice) and the invoices made, each with **Email** — a mailto link with
+  the invoice laid out, sent from the phone's own mail app
+  (`lib/test-email.ts`). QuickBooks comes later with the real app; the
+  connection code (`lib/test-qb.ts`, `test_qb_connection`, sandbox by
+  default, never Jon Stubbs' books) is in place but not shown.
 - **Services** — name, rate, per hour or per visit. Seeded: Site visit,
   $200/hr. Clocked hours are the quantity.
 - **Customers** — name, billing email (where QuickBooks emails the invoice),
@@ -302,11 +305,11 @@ it to themselves). It has its own header and sub-tabs:
 - **Website** — a mock site for Trane Engineering with bracketed
   placeholders where real details belong.
 
-Send invoice (`POST /api/test/invoice`) records the invoice and claims the
-time first, then creates the customer, the service items and the invoice in
-QuickBooks and asks QuickBooks to email it; a failure leaves it "Not sent"
-with the reason and a Retry, never a double bill. Tables `test_*`, schema
-section 57.
+Create invoice (`POST /api/test/invoice`) records the invoice and claims
+the time, so hours are never billed twice; when Trane's QuickBooks company
+is connected it also creates and emails the QuickBooks invoice. A login that
+is only a test user (role `customer` + `is_test_user`) is kept inside
+`/test` by the middleware. Tables `test_*`, schema section 57.
 
 ### The place check
 

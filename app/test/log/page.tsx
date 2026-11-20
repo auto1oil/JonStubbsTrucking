@@ -2,7 +2,8 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
-import { entryHours, hms, money, buildLines, linesTotal, type TestCustomer, type TestService, type TestEntry } from '@/lib/test-time';
+import { entryHours, hms, money, buildLines, linesTotal, type TestCustomer, type TestService, type TestEntry, type TestInvoice } from '@/lib/test-time';
+import { invoiceMailto, invoiceNumber } from '@/lib/test-email';
 
 // Log time: pick the customer and the service, tap Clock in when you get to
 // the site, and the phone stays on a big running clock (the screen is kept
@@ -35,6 +36,8 @@ export default function LogTimePage() {
   const [adding, setAdding] = useState(false);
   const [nc, setNc] = useState({ name: '', email: '' });
   const [editId, setEditId] = useState<string | null>(null);
+  // The invoice just created, with its Email-it link.
+  const [made, setMade] = useState<TestInvoice | null>(null);
   const [edit, setEdit] = useState({ in: '', out: '' });
   const wake = useRef<WakeLock | null>(null);
 
@@ -133,14 +136,12 @@ export default function LogTimePage() {
   }
 
   async function sendInvoice() {
-    setBusy('send'); setError(''); setMsg('');
+    setBusy('send'); setError(''); setMsg(''); setMade(null);
     try {
       const res = await fetch('/api/test/invoice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customer_id: customerId }) });
       const json = await res.json();
       if (!json.ok) { setError(json.error || 'Could not invoice.'); return; }
-      const inv = json.invoice as { status: string; total: number; qb_doc_number: string | null; emailed_to: string | null; error: string | null };
-      if (inv.status === 'sent') setMsg(`Invoice ${inv.qb_doc_number ? `#${inv.qb_doc_number} ` : ''}for ${money(Number(inv.total))} created in QuickBooks and emailed to ${inv.emailed_to}.`);
-      else setError(`Invoice for ${money(Number(inv.total))} saved${inv.status === 'invoiced' ? ' in QuickBooks' : ''}, but: ${inv.error}. Fix it and press Retry on the Invoices tab.`);
+      setMade(json.invoice as TestInvoice);
       loadUnbilled();
     } catch {
       setError('No signal — try again.');
@@ -214,6 +215,21 @@ export default function LogTimePage() {
       </div>
 
       {msg && <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">{msg}</p>}
+      {made && (() => {
+        const c = customers.find((x) => x.id === made.customer_id);
+        return (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+            <p className="text-sm text-emerald-900 font-medium">Invoice {invoiceNumber(made)} — {money(Number(made.total))} for {c?.name}</p>
+            {c?.email ? (
+              <a href={invoiceMailto(made, c)} className="mt-3 block w-full text-center py-4 rounded-xl bg-emerald-700 text-white text-lg font-semibold">
+                Email it to {c.email}
+              </a>
+            ) : (
+              <p className="text-sm text-amber-800 mt-2">No email on file for this customer — <Link href="/test/customers" className="underline">add one</Link>, then email it from the Invoices tab.</p>
+            )}
+          </div>
+        );
+      })()}
       {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
 
       {cust && (
@@ -265,9 +281,9 @@ export default function LogTimePage() {
               </div>
               <button onClick={sendInvoice} disabled={busy === 'send' || total <= 0}
                 className="mt-3 w-full py-4 rounded-xl bg-slate-900 text-white text-lg font-semibold disabled:opacity-50">
-                {busy === 'send' ? 'Sending…' : `Send invoice — ${money(total)}`}
+                {busy === 'send' ? 'Creating…' : `Create invoice — ${money(total)}`}
               </button>
-              <p className="text-[11px] text-gray-500 mt-1.5 text-center">Creates the invoice in QuickBooks and emails it to {cust.email || 'the customer'}.</p>
+              <p className="text-[11px] text-gray-500 mt-1.5 text-center">Creates the invoice, then one tap emails it to {cust.email || 'the customer'} from your phone.</p>
             </>
           )}
         </div>

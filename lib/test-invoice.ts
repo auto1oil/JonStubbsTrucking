@@ -8,7 +8,7 @@
 
 import { createAdminClient } from '@/lib/supabase-admin';
 import { buildLines, linesTotal, type TestCustomer, type TestEntry, type TestInvoice, type TestService } from '@/lib/test-time';
-import { ensureQbCustomer, ensureQbItem, createQbInvoice, emailQbInvoice } from '@/lib/test-qb';
+import { ensureQbCustomer, ensureQbItem, createQbInvoice, emailQbInvoice, testQbStatus } from '@/lib/test-qb';
 
 export async function createInvoiceForCustomer(customerId: string, userId: string): Promise<{ ok: boolean; invoiceId?: string; error?: string }> {
   const db = createAdminClient();
@@ -30,7 +30,9 @@ export async function createInvoiceForCustomer(customerId: string, userId: strin
   // Claim the entries; only ones still unbilled are taken.
   await db.from('test_time_entries').update({ invoice_id: invoiceId }).in('id', entries.map((e) => e.id)).is('invoice_id', null);
 
-  await deliverInvoice(invoiceId);
+  // QuickBooks comes later. Until Trane's company is connected the invoice
+  // is complete here, and the screen offers to email it from the phone.
+  if ((await testQbStatus()).connected) await deliverInvoice(invoiceId);
   return { ok: true, invoiceId };
 }
 
