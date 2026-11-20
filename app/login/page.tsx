@@ -42,9 +42,13 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    // Phones capitalize the first letter and autofill can add a trailing
+    // space; Supabase stores emails lower-case, so send it that way.
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
     if (error) {
-      setError(error.message);
+      setError(error.message === 'Invalid login credentials'
+        ? 'That email and password don’t match an account. Check the password (it’s case-sensitive), or ask an admin to reset it.'
+        : error.message);
       setLoading(false);
     } else {
       // Record the sign-in before moving on — identity comes from the fresh
