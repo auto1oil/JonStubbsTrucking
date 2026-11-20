@@ -282,6 +282,32 @@ built so the driver types almost nothing:
   it to the office. The office still edits with the full form
   (`components/WorkOrderForm.tsx`).
 
+### The Test tab (Trane Engineering)
+
+A trial business inside the app, only for logins an admin ticks as **Test
+user** on the Users page (`profiles.is_test_user`, guarded so nobody grants
+it to themselves). It has its own header and sub-tabs:
+
+- **Log time** — pick customer and service, Clock in; the screen becomes a
+  big running clock (screen kept awake with the Wake Lock API) with the
+  running dollar amount; Clock out. Underneath, the customer's unbilled
+  time is tallied by service with **Send invoice**.
+- **Invoices** — Trane's own QuickBooks connection (`test_qb_connection`,
+  sandbox by default, `lib/test-qb.ts`, never Jon Stubbs' books), every
+  customer with time waiting, and sent invoices with Retry.
+- **Services** — name, rate, per hour or per visit. Seeded: Site visit,
+  $200/hr. Clocked hours are the quantity.
+- **Customers** — name, billing email (where QuickBooks emails the invoice),
+  phone, address.
+- **Website** — a mock site for Trane Engineering with bracketed
+  placeholders where real details belong.
+
+Send invoice (`POST /api/test/invoice`) records the invoice and claims the
+time first, then creates the customer, the service items and the invoice in
+QuickBooks and asks QuickBooks to email it; a failure leaves it "Not sent"
+with the reason and a Retry, never a double bill. Tables `test_*`, schema
+section 57.
+
 ### The place check
 
 Every GPS stamp on a ticket is measured against the order it was filed on:

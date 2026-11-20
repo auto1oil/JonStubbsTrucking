@@ -23,6 +23,7 @@ type Profile = {
   // Which hauling company a 'hauler' login belongs to. Null for everyone
   // else — it is what scopes a hauler to their own fleet and loads.
   hauler_id: string | null;
+  is_test_user?: boolean;
 };
 
 const roleBadgeClass: Record<Role, string> = {
@@ -72,8 +73,10 @@ export default function UsersPage() {
     // Hide customers from this list — they're managed in /admin/customers.
     const { data } = await supabase
       .from('profiles')
-      .select('id, email, full_name, role, phone, contact_email, territory_counties, qb_class, hauler_id')
-      .neq('role', 'customer')
+      .select('id, email, full_name, role, phone, contact_email, territory_counties, qb_class, hauler_id, is_test_user')
+      // Staff, plus any login given the Test tab (a test user can be a
+      // plain sign-in with no staff role).
+      .or('role.neq.customer,is_test_user.eq.true')
       .order('full_name');
     setUsers((data as Profile[]) || []);
     const { data: hs } = await supabase
@@ -322,6 +325,7 @@ export default function UsersPage() {
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleBadgeClass[u.role] || roleBadgeClass.driver}`}>
                     {u.role}
                   </span>
+                  {u.is_test_user && <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-900">test</span>}
                   <div className="text-right shrink-0 min-w-[140px]">
                     {(() => {
                       const n = u.territory_counties?.length ?? 0;
@@ -416,6 +420,20 @@ export default function UsersPage() {
                         </button>
                       </div>
                     </div>
+
+                    {/* The Test tab (Trane Engineering) — admins grant it. */}
+                    <label className="flex items-center gap-3 bg-white border border-gray-200 rounded px-3 py-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={!!u.is_test_user}
+                        onChange={async (e) => {
+                          const { error } = await supabase.from('profiles').update({ is_test_user: e.target.checked }).eq('id', u.id);
+                          if (error) setRowError({ id: u.id, msg: error.message }); else load();
+                        }}
+                        className="h-5 w-5 rounded border-gray-300"
+                      />
+                      <span>Test user <span className="text-xs text-gray-500">— can open the Test tab (Trane Engineering)</span></span>
+                    </label>
 
                     <details className="bg-white border border-gray-200 rounded">
                       <summary className="px-3 py-2 cursor-pointer text-xs font-semibold uppercase tracking-wide text-gray-500 hover:bg-gray-50 rounded">

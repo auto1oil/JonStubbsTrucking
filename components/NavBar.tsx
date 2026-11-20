@@ -19,6 +19,7 @@ export default function NavBar({ role, email }: { role: Role; email: string }) {
   // A driver who belongs to a hauling company gets a much shorter nav than
   // one of Jon Stubbs Trucking's own crew — they are here for haul tickets only.
   const [haulerId, setHaulerId] = useState<string | null>(null);
+  const [isTestUser, setIsTestUser] = useState(false);
   const [approvals, setApprovals] = useState(0);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
@@ -33,8 +34,9 @@ export default function NavBar({ role, email }: { role: Role; email: string }) {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       setUserId(user?.id || null);
       if (!user) return;
-      const { data } = await supabase.from('profiles').select('full_name, hauler_id').eq('id', user.id).single();
+      const { data } = await supabase.from('profiles').select('full_name, hauler_id, is_test_user').eq('id', user.id).single();
       setHaulerId(data?.hauler_id ?? null);
+      setIsTestUser(!!(data as { is_test_user?: boolean } | null)?.is_test_user);
       const fn = (data?.full_name || '').trim().split(/\s+/)[0];
       setFirstName(fn || (email ? email.split('@')[0] : ''));
     });
@@ -161,7 +163,9 @@ export default function NavBar({ role, email }: { role: Role; email: string }) {
     : role === 'funder' ? '/funder/approve'
     : '/work-orders';
   const group = navGroupForRole(role);
-  const links = group ? baseLinks.filter((l) => !hidden.has(featureKey(group, l.href))) : baseLinks;
+  const roleLinks = group ? baseLinks.filter((l) => !hidden.has(featureKey(group, l.href))) : baseLinks;
+  // The Test tab (Trane Engineering) for logins an admin marked as test users.
+  const links = isTestUser ? [...roleLinks, { href: '/test', label: 'Test' }] : roleLinks;
 
   function isActive(href: string): boolean {
     if (!pathname) return false;

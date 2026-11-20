@@ -9,9 +9,12 @@ export default async function Home() {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, is_test_user')
     .eq('id', user.id)
     .single();
+
+  // A plain sign-in given the Test tab goes straight to it.
+  if (profile?.role === 'customer' && (profile as { is_test_user?: boolean }).is_test_user) redirect('/test');
 
   if (profile?.role === 'admin' || profile?.role === 'master_admin') redirect('/admin');
   if (profile?.role === 'contractor') redirect('/contractor');

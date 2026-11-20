@@ -3497,5 +3497,143 @@ notify pgrst, 'reload schema';
 
 
 -- ==========================================================================
+-- 57. The Test tab — Trane Engineering (a trial business inside the app)
+-- ==========================================================================
+-- Clock in at the site, clock out when leaving, tally the time by service,
+-- and send the customer a QuickBooks invoice by email. Only logins marked as
+-- test users see any of it; it has its own customers, services, time, its
+-- own invoices, and its own QuickBooks connection (a sandbox company), so
+-- nothing here touches Jon Stubbs Trucking's books.
+-- ==========================================================================
+
+alter table public.profiles add column if not exists is_test_user boolean not null default false;
+
+create or replace function public.is_test_user()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((select is_test_user from public.profiles where id = auth.uid()), false);
+$$;
+grant execute on function public.is_test_user() to authenticated;
+
+-- Only an admin may grant the Test tab; nobody grants it to themselves.
+create or replace function public.guard_profile_privileges()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null or current_user = 'service_role' then
+    return new;
+  end if;
+  if new.role is distinct from old.role then
+    if not public.is_admin() then
+      raise exception 'only an admin can change a role';
+    end if;
+  end if;
+  if new.hauler_id is distinct from old.hauler_id then
+    if not public.is_admin() then
+      raise exception 'only an admin can change which company a login belongs to';
+    end if;
+  end if;
+  if new.is_test_user is distinct from old.is_test_user then
+    if not public.is_admin() then
+      raise exception 'only an admin can give a login the Test tab';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create table if not exists public.test_customers (
+  id             uuid primary key default gen_random_uuid(),
+  name           text not null,
+  email          text,
+  phone          text,
+  address        text,
+  qb_customer_id text,
+  active         boolean not null default true,
+  created_at     timestamptz not null default now()
+);
+
+create table if not exists public.test_services (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null,
+  rate       numeric(12,2) not null default 0,
+  unit       text not null default 'hour' check (unit in ('hour', 'each')),
+  qb_item_id text,
+  active     boolean not null default true,
+  sort       integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.test_invoices (
+  id             uuid primary key default gen_random_uuid(),
+  customer_id    uuid not null references public.test_customers(id) on delete restrict,
+  lines          jsonb not null default '[]',
+  total          numeric(12,2) not null default 0,
+  status         text not null default 'draft' check (status in ('draft', 'invoiced', 'sent', 'failed')),
+  qb_invoice_id  text,
+  qb_doc_number  text,
+  emailed_to     text,
+  sent_at        timestamptz,
+  error          text,
+  created_by     uuid references public.profiles(id) on delete set null,
+  created_at     timestamptz not null default now()
+);
+
+create table if not exists public.test_time_entries (
+  id            uuid primary key default gen_random_uuid(),
+  customer_id   uuid not null references public.test_customers(id) on delete restrict,
+  service_id    uuid not null references public.test_services(id) on delete restrict,
+  user_id       uuid references public.profiles(id) on delete set null,
+  clock_in_at   timestamptz not null default now(),
+  clock_out_at  timestamptz,
+  notes         text,
+  invoice_id    uuid references public.test_invoices(id) on delete set null,
+  created_at    timestamptz not null default now()
+);
+create index if not exists test_time_open_idx on public.test_time_entries (user_id) where clock_out_at is null;
+create index if not exists test_time_unbilled_idx on public.test_time_entries (customer_id) where invoice_id is null;
+
+-- Trane's own QuickBooks connection: one row, kept apart from Jon Stubbs'.
+create table if not exists public.test_qb_connection (
+  id                      int primary key default 1 check (id = 1),
+  realm_id                text,
+  access_token            text,
+  access_token_expires_at timestamptz,
+  refresh_token           text,
+  environment             text not null default 'sandbox' check (environment in ('sandbox', 'production')),
+  connected_at            timestamptz,
+  updated_at              timestamptz not null default now()
+);
+
+grant select, insert, update, delete on public.test_customers, public.test_services, public.test_invoices, public.test_time_entries to authenticated;
+grant select, insert, update, delete on public.test_customers, public.test_services, public.test_invoices,
+  public.test_time_entries, public.test_qb_connection to service_role;
+alter table public.test_customers     enable row level security;
+alter table public.test_services      enable row level security;
+alter table public.test_invoices      enable row level security;
+alter table public.test_time_entries  enable row level security;
+alter table public.test_qb_connection enable row level security;  -- no policies: server only
+
+drop policy if exists "test_customers test users" on public.test_customers;
+create policy "test_customers test users" on public.test_customers for all to authenticated
+  using (public.is_test_user()) with check (public.is_test_user());
+drop policy if exists "test_services test users" on public.test_services;
+create policy "test_services test users" on public.test_services for all to authenticated
+  using (public.is_test_user()) with check (public.is_test_user());
+drop policy if exists "test_time test users" on public.test_time_entries;
+create policy "test_time test users" on public.test_time_entries for all to authenticated
+  using (public.is_test_user()) with check (public.is_test_user());
+-- Invoices are written by the send route (service role); test users read them.
+drop policy if exists "test_invoices test users read" on public.test_invoices;
+create policy "test_invoices test users read" on public.test_invoices for select to authenticated
+  using (public.is_test_user());
+
+-- The first service, as asked: a site visit at $200 an hour.
+insert into public.test_services (name, rate, unit, sort)
+select 'Site visit', 200, 'hour', 1
+where not exists (select 1 from public.test_services);
+
+notify pgrst, 'reload schema';
+
+
+-- ==========================================================================
 -- DONE
 -- ==========================================================================
