@@ -8,6 +8,7 @@ const TABS = [
   { href: '/test/services', label: 'Services' },
   { href: '/test/customers', label: 'Customers' },
   { href: '/test/website', label: 'Website' },
+  { href: '/test/team', label: 'Test users' },
 ];
 
 export default function TestNav() {

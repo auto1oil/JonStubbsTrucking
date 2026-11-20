@@ -4,17 +4,18 @@ import { createClient } from '@/lib/supabase-server';
 import TestNav from '@/components/TestNav';
 import SignOutButton from '@/components/SignOutButton';
 import { BUSINESS } from '@/lib/test-time';
+import { hasTestAccess } from '@/lib/test-auth';
 
-// The Test tab: Trane Engineering, a trial business inside the app. Only a
-// login an admin marked as a test user gets in, whatever its role. It has
-// its own header so it reads as its own business.
+// The Test tab: Trane Engineering, a trial business inside the app. Admins
+// and logins marked as test users get in. It has its own header so it reads
+// as its own business.
 
 export default async function TestLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
   const { data: profile } = await supabase.from('profiles').select('role, email, is_test_user').eq('id', user.id).single();
-  if (!(profile as { is_test_user?: boolean } | null)?.is_test_user) redirect('/');
+  if (!hasTestAccess(profile as { role?: string; is_test_user?: boolean } | null)) redirect('/');
   const staff = ['admin', 'master_admin', 'office', 'driver', 'mechanic', 'labor', 'hauler', 'contractor', 'funder'].includes(profile?.role || '');
 
   return (

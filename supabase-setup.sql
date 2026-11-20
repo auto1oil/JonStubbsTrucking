@@ -3634,6 +3634,21 @@ where not exists (select 1 from public.test_services);
 notify pgrst, 'reload schema';
 
 
+
+-- ==========================================================================
+-- 58. Admins see the Test tab without being marked as test users
+-- ==========================================================================
+-- RLS on every test_* table asks public.is_test_user(); admins now pass it
+-- too. Adding test users goes through /api/test/users (service role), which
+-- anyone with the Test tab can use for new logins.
+-- ==========================================================================
+
+create or replace function public.is_test_user()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((select is_test_user or role in ('admin', 'master_admin') from public.profiles where id = auth.uid()), false);
+$$;
+grant execute on function public.is_test_user() to authenticated;
+
 -- ==========================================================================
 -- DONE
 -- ==========================================================================

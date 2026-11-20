@@ -165,7 +165,8 @@ export default function NavBar({ role, email }: { role: Role; email: string }) {
   const group = navGroupForRole(role);
   const roleLinks = group ? baseLinks.filter((l) => !hidden.has(featureKey(group, l.href))) : baseLinks;
   // The Test tab (Trane Engineering) for logins an admin marked as test users.
-  const links = isTestUser ? [...roleLinks, { href: '/test', label: 'Test' }] : roleLinks;
+  const showTest = isTestUser || role === 'admin' || role === 'master_admin';
+  const links = showTest ? [...roleLinks, { href: '/test', label: 'Test' }] : roleLinks;
 
   function isActive(href: string): boolean {
     if (!pathname) return false;
